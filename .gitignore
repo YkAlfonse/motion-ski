@@ -1,0 +1,7 @@
+build*/
+*.o
+*.ppm
+*.png
+!docs/**/*.png
+__pycache__/
+latency.log

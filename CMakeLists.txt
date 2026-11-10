@@ -1,0 +1,60 @@
+cmake_minimum_required(VERSION 3.16)
+project(motion_ski C)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+add_compile_options(-Wall -Wextra)
+
+option(DESKTOP "Build for a Linux PC with an SDL2 window instead of HDMI on the board" OFF)
+set(NFS_DIR "$ENV{HOME}/ensc351/public/myApps/motion-ski" CACHE PATH "Folder the deploy target copies to")
+
+find_package(Threads REQUIRED)
+file(GLOB CORE_SRC CONFIGURE_DEPENDS hal/*.c app/*.c)
+list(REMOVE_ITEM CORE_SRC ${CMAKE_CURRENT_SOURCE_DIR}/app/main.c)
+add_library(core OBJECT ${CORE_SRC})
+target_include_directories(core PUBLIC include app hal)
+target_link_libraries(core PUBLIC Threads::Threads m)
+if(DESKTOP)
+  find_package(SDL2 REQUIRED)
+  target_compile_definitions(core PUBLIC USE_SDL)
+  target_link_libraries(core PUBLIC SDL2::SDL2)
+endif()
+
+set(DEPLOY_TARGETS "")
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/app/main.c)
+  add_executable(motion_ski app/main.c)
+  target_link_libraries(motion_ski PRIVATE core)
+  list(APPEND DEPLOY_TARGETS motion_ski)
+endif()
+
+file(GLOB TOOL_SRC CONFIGURE_DEPENDS tools/*.c)
+foreach(src ${TOOL_SRC})
+  get_filename_component(name ${src} NAME_WE)
+  add_executable(${name} ${src})
+  target_link_libraries(${name} PRIVATE core)
+  list(APPEND DEPLOY_TARGETS ${name})
+endforeach()
+
+enable_testing()
+file(GLOB TEST_SRC CONFIGURE_DEPENDS tests/*_test.c)
+foreach(src ${TEST_SRC})
+  get_filename_component(name ${src} NAME_WE)
+  add_executable(${name} ${src})
+  target_link_libraries(${name} PRIVATE core)
+  target_compile_options(${name} PRIVATE -UNDEBUG)
+  add_test(NAME ${name} COMMAND ${name})
+endforeach()
+
+file(GLOB SCRIPTS CONFIGURE_DEPENDS scripts/*.sh)
+set(DEPLOY_FILES "")
+foreach(t ${DEPLOY_TARGETS})
+  list(APPEND DEPLOY_FILES $<TARGET_FILE:${t}>)
+endforeach()
+add_custom_target(deploy
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${NFS_DIR}
+  COMMAND ${CMAKE_COMMAND} -E copy ${DEPLOY_FILES} ${SCRIPTS} ${NFS_DIR}
+  DEPENDS ${DEPLOY_TARGETS}
+  COMMENT "Copying Motion Ski to ${NFS_DIR}")
