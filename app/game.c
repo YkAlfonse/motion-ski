@@ -56,6 +56,7 @@ int game_update(Game *g, float dt)
 {
     int fl = 0;
     if (g->over) return 0;
+    if (dt > 0.1f) dt = 0.1f;
     g->time += dt;
     g->speed = fminf(MAX_SPEED, START_SPEED + ACCEL * g->time);
     float dz = g->speed * dt, d = g->lane - g->lane_x, step = LANE_SLIDE * dt;
