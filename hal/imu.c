@@ -36,7 +36,7 @@
 #define ACC_G_PER_LSB 0.000122f
 #define GYRO_DPS_PER_LSB 0.0175f
 
-// max wait for new data, 1 ms per try (one sample is ~9.6 ms)
+// max wait for new data, 1 ms per try
 #define WAIT_TRIES 20
 
 static int fd = -1;
@@ -130,7 +130,7 @@ bool imu_read(ImuSample *s)
     uint8_t status = 0, d[12];
     int16_t raw[6];
 
-    if (fd < 0)
+    if (fd < 0 || !s)
         return false;
 
     for (int i = 0;; i++) {
