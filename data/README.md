@@ -1,6 +1,8 @@
 # IMU recordings
 
-Recorded on the board with `imu_log`. Stand still for 3 s at the start of each one.
+Recorded on the board with `imu_log`, then copied into this `data/` folder. Stand still for 3 s at the start of each one.
+
+On the board, from `/mnt/remote/myApps/motion-ski`:
 
 ```bash
 sudo ./imu_log -g > jump_sehaj_01.csv      # calibrate first, then record
@@ -9,9 +11,10 @@ sudo ./imu_log -t 30 > still_sehaj_01.csv  # raw only, stop after 30 s
 
 Ctrl+C stops a recording. When it stops it prints the sample count, rate and failed reads.
 
-Plot on the PC:
+Then on the PC, from the repo folder, copy them in and plot:
 
 ```bash
+cp ~/ensc351/public/myApps/motion-ski/*.csv data/
 python3 tools/plot_imu.py data/*.csv
 ```
 
