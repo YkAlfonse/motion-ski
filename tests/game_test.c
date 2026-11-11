@@ -61,6 +61,10 @@ int main(void)
     for (int i = 0; i < 60; i++) game_update(&g, 0.016f);
     assert(g.pose == POSE_SKI);
 
+    game_reset(&g, 9);
+    game_update(&g, 3.0f);
+    assert(fabsf(g.time - 0.1f) < 1e-5f && g.distance <= g.speed * 0.1f + 1e-4f);
+
     for (unsigned seed = 1; seed <= 100; seed++) {
         game_reset(&g, seed);
         for (int step = 0; step < 3000; step++) {
