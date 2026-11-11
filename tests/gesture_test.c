@@ -147,16 +147,9 @@ static float axis_match(const float *axes, int i, vec3 want)
     return dot(v3(axes[3 * i], axes[3 * i + 1], axes[3 * i + 2]), want);
 }
 
-int main(void)
+// calibration steps after standing still: lean right, center, bend, center
+static void cal_lean_and_bend(void)
 {
-    float axes[9], saved[9];
-
-    assert(gesture_update(NULL) == -1);
-
-    // full calibration, same steps the player does
-    gesture_calibrate(true);
-    assert(gesture_cal_phase() == CAL_STILL);
-    hold(1.5f, 0);
     assert(gesture_cal_phase() == CAL_LEAN_RIGHT);
     move_to(25, 0, 0.5f);
     hold(1.0f, 0);
@@ -171,13 +164,31 @@ int main(void)
     hold(0.6f, 0);
     assert(gesture_cal_phase() == CAL_IDLE);
     assert(gesture_has_axes());
+}
 
+static void check_axes(void)
+{
+    float axes[9];
     gesture_get_axes(axes);
     printf("axes match up %.3f right %.3f fwd %.3f\n", axis_match(axes, 0, U),
            axis_match(axes, 1, R), axis_match(axes, 2, F));
     assert(axis_match(axes, 0, U) > 0.99f);
     assert(axis_match(axes, 1, R) > 0.98f);
     assert(axis_match(axes, 2, F) > 0.98f);
+}
+
+int main(void)
+{
+    float axes[9], saved[9];
+
+    assert(gesture_update(NULL) == -1);
+
+    // full calibration, same steps the player does
+    gesture_calibrate(true);
+    assert(gesture_cal_phase() == CAL_STILL);
+    hold(1.5f, 0);
+    cal_lean_and_bend();
+    check_axes();
     expect("calibration", 0, 0, 0, 0);
 
     hold(3.0f, 0);
@@ -249,6 +260,28 @@ int main(void)
     lean_and_back(25, 0);
     jump();
     expect("saved axes", 0, 1, 1, 0);
+
+    // saved axes where right points the same way as up get rejected
+    float bad[9];
+    for (int i = 0; i < 9; i++)
+        bad[i] = saved[i];
+    for (int i = 0; i < 3; i++)
+        bad[3 + i] = saved[i];
+    gesture_set_axes(bad);
+    assert(!gesture_has_axes());
+    lean_and_back(25, 0);
+    expect("parallel axes rejected", 0, 0, 0, 0);
+
+    // axes from a very different mount, quick calibration has to do the full one
+    float other[9] = { R.x, R.y, R.z, U.x, U.y, U.z, F.x, F.y, F.z };
+    gesture_set_axes(other);
+    assert(gesture_has_axes());
+    gesture_calibrate(false);
+    hold(1.5f, 0);
+    cal_lean_and_bend();
+    check_axes();
+    lean_and_back(25, 0);
+    expect("new mount, full cal", 0, 1, 0, 0);
 
     printf("all gesture tests passed\n");
     return 0;

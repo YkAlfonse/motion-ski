@@ -1,5 +1,6 @@
 // gesture detection from the chest IMU
 #include <math.h>
+#include <pthread.h>
 #include <string.h>
 #include "gesture.h"
 #include "events.h"
@@ -19,6 +20,8 @@
 #define CAL_BACK_DEG 6.0f
 // lean and bend directions have to be close to perpendicular
 #define CAL_MAX_DOT 0.5f
+// an axis shorter than this after straightening is no good
+#define MIN_AXIS_LEN 0.5f
 
 // tilt filter
 #define FILT_K 0.02f
@@ -43,6 +46,9 @@ typedef struct {
 } vec3;
 
 static const float sens_scale[] = { 1.3f, 1.0f, 0.75f };
+
+// imu thread and menu both call in here
+static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
 
 // learned body directions in sensor coordinates
 static vec3 up, right, fwd;
@@ -158,9 +164,16 @@ static void cal_commit(vec3 u, vec3 r, vec3 f)
 // quick calibration only re-learns up, old right/forward get straightened to match
 static void cal_finish_quick(void)
 {
-    vec3 r = unit(reject(right, cal_up));
-    vec3 f = unit(reject(reject(fwd, cal_up), r));
-    cal_commit(cal_up, r, f);
+    vec3 r = reject(right, cal_up);
+    vec3 f = reject(reject(fwd, cal_up), unit(r));
+
+    // mounted too differently from last time, do the full calibration instead
+    if (len(r) < MIN_AXIS_LEN || len(f) < MIN_AXIS_LEN) {
+        cal_full = true;
+        cal_start(CAL_LEAN_RIGHT);
+        return;
+    }
+    cal_commit(cal_up, unit(r), unit(f));
 }
 
 static void cal_finish_full(void)
@@ -339,35 +352,45 @@ static int detect(uint64_t t)
 
 void gesture_calibrate(bool full)
 {
+    pthread_mutex_lock(&mtx);
     cal_full = full || !have_axes;
     lp_init = false;
     reset_tracking();
     cal_start(CAL_STILL);
+    pthread_mutex_unlock(&mtx);
 }
 
 CalPhase gesture_cal_phase(void)
 {
-    return phase;
+    pthread_mutex_lock(&mtx);
+    CalPhase p = phase;
+    pthread_mutex_unlock(&mtx);
+    return p;
 }
 
 bool gesture_has_axes(void)
 {
-    return have_axes;
+    pthread_mutex_lock(&mtx);
+    bool h = have_axes;
+    pthread_mutex_unlock(&mtx);
+    return h;
 }
 
 // order is up, right, forward
 void gesture_get_axes(float axes[9])
 {
+    pthread_mutex_lock(&mtx);
     if (!have_axes) {
         memset(axes, 0, 9 * sizeof *axes);
-        return;
+    } else {
+        vec3 v[3] = { up, right, fwd };
+        for (int i = 0; i < 3; i++) {
+            axes[3 * i] = v[i].x;
+            axes[3 * i + 1] = v[i].y;
+            axes[3 * i + 2] = v[i].z;
+        }
     }
-    vec3 v[3] = { up, right, fwd };
-    for (int i = 0; i < 3; i++) {
-        axes[3 * i] = v[i].x;
-        axes[3 * i + 1] = v[i].y;
-        axes[3 * i + 2] = v[i].z;
-    }
+    pthread_mutex_unlock(&mtx);
 }
 
 void gesture_set_axes(const float axes[9])
@@ -376,22 +399,32 @@ void gesture_set_axes(const float axes[9])
     vec3 r = v3(axes[3], axes[4], axes[5]);
     vec3 f = v3(axes[6], axes[7], axes[8]);
 
+    pthread_mutex_lock(&mtx);
     reset_tracking();
+    have_axes = false;
+
     // all zeros means nothing was saved yet
-    if (len(u) < 0.5f || len(r) < 0.5f || len(f) < 0.5f) {
-        have_axes = false;
-        return;
+    if (len(u) >= MIN_AXIS_LEN && len(r) >= MIN_AXIS_LEN && len(f) >= MIN_AXIS_LEN) {
+        u = unit(u);
+        r = reject(unit(r), u);
+        f = reject(reject(unit(f), u), unit(r));
+        // axes that point the same way shrink to almost nothing here
+        if (len(r) >= MIN_AXIS_LEN && len(f) >= MIN_AXIS_LEN) {
+            up = u;
+            right = unit(r);
+            fwd = unit(f);
+            have_axes = true;
+        }
     }
-    up = unit(u);
-    right = unit(reject(r, up));
-    fwd = unit(reject(reject(f, up), right));
-    have_axes = true;
+    pthread_mutex_unlock(&mtx);
 }
 
 void gesture_cancel(void)
 {
+    pthread_mutex_lock(&mtx);
     phase = CAL_IDLE;
     reset_tracking();
+    pthread_mutex_unlock(&mtx);
 }
 
 void gesture_set_sensitivity(int level)
@@ -400,34 +433,40 @@ void gesture_set_sensitivity(int level)
         level = SENS_LOW;
     if (level > SENS_HIGH)
         level = SENS_HIGH;
+    pthread_mutex_lock(&mtx);
     scale = sens_scale[level];
+    pthread_mutex_unlock(&mtx);
 }
 
 int gesture_update(const ImuSample *s)
 {
+    int ev = -1;
+
     if (!s)
         return -1;
 
     vec3 a = v3(s->ax, s->ay, s->az);
     vec3 g = v3(s->gx, s->gy, s->gz);
 
+    pthread_mutex_lock(&mtx);
     if (phase != CAL_IDLE) {
         cal_step(a, g);
-        return -1;
+    } else if (have_axes) {
+        track(s, a, g);
+        ev = detect(s->t_ms);
     }
-    if (!have_axes)
-        return -1;
-
-    track(s, a, g);
-    return detect(s->t_ms);
+    pthread_mutex_unlock(&mtx);
+    return ev;
 }
 
 void gesture_debug(float *roll, float *pitch, float *up_out)
 {
+    pthread_mutex_lock(&mtx);
     if (roll)
         *roll = roll_deg;
     if (pitch)
         *pitch = pitch_deg;
     if (up_out)
         *up_out = up_g;
+    pthread_mutex_unlock(&mtx);
 }
