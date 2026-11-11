@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include "game.h"
 
@@ -9,6 +10,21 @@ static void place(ObsType t, int lane)
     game_reset(&g, 7);
     g.next_row = 1e9f;
     g.obs[0] = (Obstacle){ t, lane, 0.1f, true };
+}
+
+static void check_rows(void)
+{
+    float z[MAX_OBS];
+    int lanes[MAX_OBS], rows = 0;
+    for (int i = 0; i < MAX_OBS; i++) {
+        const Obstacle *o = &g.obs[i];
+        if (!o->active || o->type == OBS_COIN) continue;
+        int r = 0;
+        while (r < rows && fabsf(z[r] - o->z) > 2.0f) r++;
+        if (r == rows) { z[rows] = o->z; lanes[rows++] = 0; }
+        lanes[r] |= 1 << o->lane;
+    }
+    for (int r = 0; r < rows; r++) assert(lanes[r] != (1 << LANES) - 1);
 }
 
 int main(void)
@@ -45,18 +61,12 @@ int main(void)
     for (int i = 0; i < 60; i++) game_update(&g, 0.016f);
     assert(g.pose == POSE_SKI);
 
-    for (unsigned seed = 1; seed < 200; seed++) {
+    for (unsigned seed = 1; seed <= 100; seed++) {
         game_reset(&g, seed);
-        for (int step = 0; step < 6000 && !g.over; step++) {
-            g.lane = 1;
-            game_update(&g, 0.016f);
-            for (int i = 0; i < MAX_OBS; i++) {
-                int blocked = 0;
-                for (int j = 0; j < MAX_OBS; j++)
-                    blocked += g.obs[i].active && g.obs[j].active && g.obs[j].type != OBS_COIN && g.obs[j].z == g.obs[i].z;
-                assert(blocked < LANES);
-            }
-            if (g.over) game_reset(&g, seed + 1000);
+        for (int step = 0; step < 3000; step++) {
+            game_update(&g, step % 500 == 499 ? 3.0f : 0.016f);
+            check_rows();
+            g.over = false;
         }
     }
     game_reset(&g, 5);
