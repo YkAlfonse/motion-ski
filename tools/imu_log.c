@@ -90,6 +90,9 @@ int main(int argc, char **argv)
         float roll = 0, pitch = 0, up = 0;
         int ev = -1;
 
+        if (secs > 0 && now_ms() - start >= secs * 1000)
+            break;
+
         if (!imu_read(&s)) {
             fails++;
             sleep_ms(5);
@@ -109,9 +112,6 @@ int main(int argc, char **argv)
             first = s.t_ms;
         last = s.t_ms;
         n++;
-
-        if (secs > 0 && now_ms() - start >= secs * 1000)
-            break;
     }
 
     imu_close();
