@@ -9,14 +9,34 @@
 
 static int request(int chip, unsigned offset, bool output, bool pull_up)
 {
-    struct gpio_v2_line_request req = { .offsets = { offset }, .num_lines = 1 };
+    struct gpio_v2_line_request req = {
+        .offsets = { offset },
+        .num_lines = 1
+    };
+
     strcpy(req.consumer, "motion-ski");
-    req.config.flags = output ? GPIO_V2_LINE_FLAG_OUTPUT : GPIO_V2_LINE_FLAG_INPUT | (pull_up ? GPIO_V2_LINE_FLAG_BIAS_PULL_UP : 0);
-    if (ioctl(chip, GPIO_V2_GET_LINE_IOCTL, &req) && pull_up) {
+
+    req.config.flags = output
+        ? GPIO_V2_LINE_FLAG_OUTPUT
+        : GPIO_V2_LINE_FLAG_INPUT |
+          (pull_up ? GPIO_V2_LINE_FLAG_BIAS_PULL_UP : 0);
+
+    if (ioctl(chip, GPIO_V2_GET_LINE_IOCTL, &req) == 0)
+        return req.fd;
+
+    // If the pull-up request failed, try without it
+    if (!output && pull_up) {
         req.config.flags = GPIO_V2_LINE_FLAG_INPUT;
-        if (ioctl(chip, GPIO_V2_GET_LINE_IOCTL, &req)) return -1;
-    } else if (req.fd <= 0) return -1;
-    return req.fd;
+
+        if (ioctl(chip, GPIO_V2_GET_LINE_IOCTL, &req) == 0) {
+            fprintf(stderr,
+                    "Warning: GPIO line %u: pull-up unavailable, using input without pull-up\n",
+                    offset);
+            return req.fd;
+        }
+    }
+
+    return -1;
 }
 
 int gpio_open(const char *name, bool output, bool pull_up)
