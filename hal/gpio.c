@@ -41,6 +41,10 @@ static int request(int chip, unsigned offset, bool output, bool pull_up)
 
 int gpio_open(const char *name, bool output, bool pull_up)
 {
+    if (name == NULL || name[0] == '\0') {
+        fprintf(stderr, "gpio_open: invalid GPIO name\n");
+        return -1;
+    }
     char path[32];
     unsigned chip_n, line_n;
     if (sscanf(name, "gpiochip%u:%u", &chip_n, &line_n) == 2) {
@@ -75,8 +79,19 @@ int gpio_get(int fd)
 
 void gpio_set(int fd, bool on)
 {
-    struct gpio_v2_line_values v = { .bits = on, .mask = 1 };
-    if (fd >= 0) ioctl(fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &v);
+    if (fd < 0) {
+        fprintf(stderr, "gpio_set: invalid file descriptor\n");
+        return;
+    }
+
+    struct gpio_v2_line_values v = {
+        .bits = on,
+        .mask = 1
+    };
+
+    if (ioctl(fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &v) < 0) {
+        perror("gpio_set: failed to set GPIO value");
+    }
 }
 
 void gpio_close(int fd)
