@@ -10,18 +10,23 @@
 
 // calibration
 #define LP_ALPHA 0.25f
+// time to get into position before the still pose is measured
+#define CAL_READY_MS 3000
 #define CAL_STILL_N 100
 #define CAL_HOLD_N 50
-#define CAL_BACK_N 30
+#define CAL_BACK_N 50
 #define STILL_GYRO_DPS 10.0f
 #define HOLD_GYRO_DPS 15.0f
 #define STILL_ACC_TOL 0.1f
 #define CAL_TILT_DEG 12.0f
-#define CAL_BACK_DEG 6.0f
-// lean and bend directions have to be close to perpendicular
-#define CAL_MAX_DOT 0.5f
+// back from a hold once at least this fraction of the way out of it
+#define CAL_BACK_FRAC 0.5f
+// lean and bend directions can't be too close to each other
+#define CAL_MAX_DOT 0.7f
 // an axis shorter than this after straightening is no good
 #define MIN_AXIS_LEN 0.5f
+// lean or bend has to be at least ~8 deg from the final standing pose
+#define MIN_HOLD_LEN 0.14f
 
 // tilt filter
 #define FILT_K 0.02f
@@ -29,8 +34,8 @@
 #define MAX_DT 0.05f
 
 // thresholds at medium sensitivity
-#define LEAN_ON_DEG 15.0f
-#define LEAN_OFF_DEG 6.0f
+#define LEAN_ON_DEG 20.0f
+#define LEAN_OFF_DEG 8.0f
 #define CROUCH_ON_DEG 25.0f
 #define CROUCH_OFF_DEG 10.0f
 #define TILT_HOLD_N 3
@@ -38,7 +43,8 @@
 #define JUMP_HOLD_N 2
 #define LAND_TOL 0.2f
 #define LAND_SETTLE_MS 150
-#define JUMP_MIN_MS 300
+// same as the game's jump time, also stops a landing bounce counting twice
+#define JUMP_MIN_MS 700
 #define JUMP_MAX_MS 1500
 
 typedef struct {
@@ -61,7 +67,10 @@ static bool cal_full;
 static vec3 lp, sum_a, sum_g;
 static bool lp_init;
 static int n_cal;
-static vec3 cal_up, cal_right, cal_fwd, cal_bias;
+static vec3 cal_up, cal_bias;
+static vec3 hold_dir, lean_hold, bend_hold;
+static float hold_tilt;
+static uint64_t cal_t0;
 
 // tracking state
 static vec3 g_est;
@@ -176,30 +185,42 @@ static void cal_finish_quick(void)
     cal_commit(cal_up, unit(r), unit(f));
 }
 
-static void cal_finish_full(void)
+// u is the final standing pose, lean and bend are measured from it
+static void cal_finish_full(vec3 u)
 {
-    if (fabsf(dot(cal_right, cal_fwd)) > CAL_MAX_DOT) {
-        // lean and bend looked the same, keep the old axes
+    // the gravity reading moves opposite to the way the body tilts
+    vec3 dr = mul(reject(sub(lean_hold, u), u), -1.0f);
+    vec3 df = mul(reject(sub(bend_hold, u), u), -1.0f);
+
+    if (len(dr) < MIN_HOLD_LEN || len(df) < MIN_HOLD_LEN ||
+        fabsf(dot(unit(dr), unit(df))) > CAL_MAX_DOT) {
+        // lean and bend too small or too alike, keep the old axes
         phase = CAL_IDLE;
         reset_tracking();
         return;
     }
-    cal_commit(cal_up, cal_right, unit(reject(cal_fwd, cal_right)));
+    // split any error between right and forward evenly
+    vec3 a = unit(dr), b = unit(df);
+    vec3 mid = unit(add(a, b)), diff = unit(sub(a, b));
+    cal_commit(u, unit(add(mid, diff)), unit(sub(mid, diff)));
 }
 
-static void cal_step(vec3 a, vec3 g)
+static void cal_step(vec3 a, vec3 g, uint64_t t)
 {
     bool acc_ok = fabsf(len(a) - 1.0f) < STILL_ACC_TOL;
-    float tilt;
+    bool moving = len(sub(g, cal_bias)) > HOLD_GYRO_DPS;
 
     if (!lp_init) {
         lp = a;
         lp_init = true;
+        cal_t0 = t;
     }
     lp = add(lp, mul(sub(a, lp), LP_ALPHA));
 
     switch (phase) {
     case CAL_STILL:
+        if (t - cal_t0 < CAL_READY_MS)
+            break;
         if (!acc_ok || len(g) > STILL_GYRO_DPS) {
             cal_start(CAL_STILL);
             break;
@@ -219,22 +240,20 @@ static void cal_step(vec3 a, vec3 g)
     case CAL_LEAN_RIGHT:
     case CAL_BEND_FORWARD:
         // wait until leaned over and holding still, then average
-        tilt = angle_deg(lp, cal_up);
-        if (tilt < CAL_TILT_DEG || len(sub(g, cal_bias)) > HOLD_GYRO_DPS) {
+        if (angle_deg(lp, cal_up) < CAL_TILT_DEG || moving) {
             n_cal = 0;
             sum_a = v3(0, 0, 0);
             break;
         }
         sum_a = add(sum_a, a);
         if (++n_cal >= CAL_HOLD_N) {
-            // the gravity reading moves opposite to the way the body tilts
-            vec3 d = sub(unit(sum_a), cal_up);
-            vec3 dir = unit(mul(reject(d, cal_up), -1.0f));
+            hold_dir = unit(sum_a);
+            hold_tilt = angle_deg(hold_dir, cal_up);
             if (phase == CAL_LEAN_RIGHT) {
-                cal_right = dir;
+                lean_hold = hold_dir;
                 cal_start(CAL_CENTER);
             } else {
-                cal_fwd = dir;
+                bend_hold = hold_dir;
                 cal_start(CAL_RETURN);
             }
         }
@@ -242,16 +261,20 @@ static void cal_step(vec3 a, vec3 g)
 
     case CAL_CENTER:
     case CAL_RETURN:
-        tilt = angle_deg(lp, cal_up);
-        if (tilt > CAL_BACK_DEG || len(sub(g, cal_bias)) > HOLD_GYRO_DPS) {
+        // back means well out of the hold and holding still,
+        // it doesn't have to match the starting pose exactly
+        if (angle_deg(lp, hold_dir) < hold_tilt * CAL_BACK_FRAC ||
+            angle_deg(lp, cal_up) > hold_tilt || moving) {
             n_cal = 0;
+            sum_a = v3(0, 0, 0);
             break;
         }
+        sum_a = add(sum_a, a);
         if (++n_cal >= CAL_BACK_N) {
             if (phase == CAL_CENTER)
                 cal_start(CAL_BEND_FORWARD);
             else
-                cal_finish_full();
+                cal_finish_full(unit(sum_a));
         }
         break;
 
@@ -295,6 +318,7 @@ static int detect(uint64_t t)
     float lean_on = LEAN_ON_DEG * scale, lean_off = LEAN_OFF_DEG * scale;
     float crouch_on = CROUCH_ON_DEG * scale, crouch_off = CROUCH_OFF_DEG * scale;
     float jump_g = 1.0f + (JUMP_G - 1.0f) * scale;
+    bool settling = false;
 
     // jump fires on the push off, then waits for the landing to settle
     if (!in_air) {
@@ -303,21 +327,31 @@ static int detect(uint64_t t)
             in_air = true;
             jump_t = settle_t = t;
             jump_n = 0;
+            lean_n = crouch_n = 0;
             return EV_JUMP;
         }
     } else {
         if (fabsf(up_g - 1.0f) > LAND_TOL)
             settle_t = t;
-        if ((t - jump_t >= JUMP_MIN_MS && t - settle_t >= LAND_SETTLE_MS) ||
-            t - jump_t >= JUMP_MAX_MS)
+        settling = t - settle_t < LAND_SETTLE_MS;
+        if ((t - jump_t >= JUMP_MIN_MS && !settling) || t - jump_t >= JUMP_MAX_MS)
             in_air = false;
     }
 
+    // body wobbles in the air and on landing, ignore tilt until it settles
+    if (settling) {
+        lean_n = crouch_n = 0;
+        return -1;
+    }
+
+    // only the bigger tilt counts, so a crouch that drifts sideways isn't a lean
+    bool sideways = fabsf(roll_deg) > pitch_deg;
+
     // lean has to come back near center before it can fire again
     if (lean_side == 0) {
-        if (roll_deg > lean_on)
+        if (sideways && roll_deg > lean_on)
             lean_n = lean_n > 0 ? lean_n + 1 : 1;
-        else if (roll_deg < -lean_on)
+        else if (sideways && roll_deg < -lean_on)
             lean_n = lean_n < 0 ? lean_n - 1 : -1;
         else
             lean_n = 0;
@@ -337,7 +371,8 @@ static int detect(uint64_t t)
     }
 
     if (!crouch_down) {
-        crouch_n = pitch_deg > crouch_on ? crouch_n + 1 : 0;
+        // landing dips forward, and the game can't crouch mid jump anyway
+        crouch_n = (!in_air && !sideways && pitch_deg > crouch_on) ? crouch_n + 1 : 0;
         if (crouch_n >= TILT_HOLD_N) {
             crouch_down = true;
             crouch_n = 0;
@@ -450,7 +485,7 @@ int gesture_update(const ImuSample *s)
 
     pthread_mutex_lock(&mtx);
     if (phase != CAL_IDLE) {
-        cal_step(a, g);
+        cal_step(a, g, s->t_ms);
     } else if (have_axes) {
         track(s, a, g);
         ev = detect(s->t_ms);

@@ -155,13 +155,13 @@ static void cal_lean_and_bend(void)
     hold(1.0f, 0);
     assert(gesture_cal_phase() == CAL_CENTER);
     move_to(0, 0, 0.5f);
-    hold(0.6f, 0);
+    hold(1.0f, 0);
     assert(gesture_cal_phase() == CAL_BEND_FORWARD);
     move_to(0, 35, 0.5f);
     hold(1.0f, 0);
     assert(gesture_cal_phase() == CAL_RETURN);
     move_to(0, 0, 0.5f);
-    hold(0.6f, 0);
+    hold(1.0f, 0);
     assert(gesture_cal_phase() == CAL_IDLE);
     assert(gesture_has_axes());
 }
@@ -186,7 +186,7 @@ int main(void)
     // full calibration, same steps the player does
     gesture_calibrate(true);
     assert(gesture_cal_phase() == CAL_STILL);
-    hold(1.5f, 0);
+    hold(4.5f, 0);
     cal_lean_and_bend();
     check_axes();
     expect("calibration", 0, 0, 0, 0);
@@ -217,23 +217,52 @@ int main(void)
     jump();
     expect("two jumps", 0, 0, 2, 0);
 
+    // body tilts sideways while in the air, only the jump should count
+    hold(0.15f, 1.0f);
+    for (int i = 1; i <= 10; i++) {
+        cur_roll = 2.5f * i;
+        step(-0.95f);
+    }
+    hold(0.15f, -0.95f);
+    for (int i = 9; i >= 0; i--) {
+        cur_roll = 2.5f * i;
+        step(-0.95f);
+    }
+    hold(0.1f, 1.5f);
+    hold(1.0f, 0);
+    expect("jump with a wobble", 0, 0, 1, 0);
+
+    // short jump that dips forward right after landing, no crouch until it's over
+    hold(0.1f, 1.0f);
+    hold(0.25f, -0.95f);
+    hold(0.05f, 1.5f);
+    move_to(0, 30, 0.1f);
+    hold(0.1f, 0);
+    move_to(0, 0, 0.1f);
+    hold(1.0f, 0);
+    expect("landing dip", 0, 0, 1, 0);
+
+    // crouch that drifts sideways past the lean angle is still just a crouch
+    lean_and_back(22, 35);
+    expect("sideways crouch", 0, 0, 0, 1);
+
     lean_and_back(10, 0);
     lean_and_back(-10, 0);
     lean_and_back(0, 15);
     expect("small sway", 0, 0, 0, 0);
 
     gesture_set_sensitivity(SENS_HIGH);
-    lean_and_back(13, 0);
-    expect("13 deg lean, high sens", 0, 1, 0, 0);
+    lean_and_back(17, 0);
+    expect("17 deg lean, high sens", 0, 1, 0, 0);
 
     gesture_set_sensitivity(SENS_MED);
-    lean_and_back(13, 0);
-    expect("13 deg lean, med sens", 0, 0, 0, 0);
+    lean_and_back(17, 0);
+    expect("17 deg lean, med sens", 0, 0, 0, 0);
 
     // quick calibration keeps the old right and forward
     gesture_get_axes(saved);
     gesture_calibrate(false);
-    hold(1.5f, 0);
+    hold(4.5f, 0);
     assert(gesture_cal_phase() == CAL_IDLE);
     gesture_get_axes(axes);
     assert(axis_match(axes, 1, R) > 0.98f);
@@ -277,11 +306,25 @@ int main(void)
     gesture_set_axes(other);
     assert(gesture_has_axes());
     gesture_calibrate(false);
-    hold(1.5f, 0);
+    hold(4.5f, 0);
     cal_lean_and_bend();
     check_axes();
     lean_and_back(25, 0);
     expect("new mount, full cal", 0, 1, 0, 0);
+
+    // started a bit hunched over the laptop, then stood up straight
+    move_to(0, 10, 0.3f);
+    gesture_calibrate(true);
+    hold(4.5f, 0);
+    move_to(0, 0, 0.5f);
+    hold(0.5f, 0);
+    cal_lean_and_bend();
+    check_axes();
+    hold(2.0f, 0);
+    lean_and_back(25, 0);
+    lean_and_back(-25, 0);
+    lean_and_back(0, 35);
+    expect("hunched start", 1, 1, 0, 1);
 
     printf("all gesture tests passed\n");
     return 0;

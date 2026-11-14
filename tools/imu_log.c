@@ -9,7 +9,7 @@
 
 static const char *const cal_msg[] = {
     [CAL_IDLE] = "",
-    [CAL_STILL] = "stand still and face forward",
+    [CAL_STILL] = "get into position, then stand still and face forward",
     [CAL_LEAN_RIGHT] = "lean right and hold",
     [CAL_CENTER] = "stand up straight",
     [CAL_BEND_FORWARD] = "bend forward and hold",
