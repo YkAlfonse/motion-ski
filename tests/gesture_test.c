@@ -246,6 +246,15 @@ int main(void)
     lean_and_back(22, 35);
     expect("sideways crouch", 0, 0, 0, 1);
 
+    // leaning back with some sideways drift isn't a lean
+    lean_and_back(22, -30);
+    lean_and_back(-22, -30);
+    expect("lean back with drift", 0, 0, 0, 0);
+
+    // a normal lean while standing a bit back still counts
+    lean_and_back(25, -10);
+    expect("lean right, slightly back", 0, 1, 0, 0);
+
     lean_and_back(10, 0);
     lean_and_back(-10, 0);
     lean_and_back(0, 15);

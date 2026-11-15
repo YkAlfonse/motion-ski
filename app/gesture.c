@@ -345,7 +345,7 @@ static int detect(uint64_t t)
     }
 
     // only the bigger tilt counts, so a crouch that drifts sideways isn't a lean
-    bool sideways = fabsf(roll_deg) > pitch_deg;
+    bool sideways = fabsf(roll_deg) > fabsf(pitch_deg);
 
     // lean has to come back near center before it can fire again
     if (lean_side == 0) {
