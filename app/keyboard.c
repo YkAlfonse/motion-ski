@@ -15,6 +15,13 @@ static struct termios saved_terminal;
 static atomic_bool keyboard_running = ATOMIC_VAR_INIT(false);
 static bool keyboard_started = false;
 
+typedef enum {
+    KEY_NORMAL,
+    KEY_ESCAPE,
+    KEY_CSI,
+    KEY_SS3
+} KeyState;
+
 static void handle_key(char key)
 {
     switch (tolower((unsigned char)key)) {
@@ -46,9 +53,69 @@ static void handle_key(char key)
     }
 }
 
+static void handle_arrow(char key)
+{
+    switch (key) {
+    case 'A':
+        events_push(EV_UP, SRC_KEYBOARD);
+        break;
+    case 'B':
+        events_push(EV_DOWN, SRC_KEYBOARD);
+        break;
+    case 'C':
+        events_push(EV_RIGHT, SRC_KEYBOARD);
+        break;
+    case 'D':
+        events_push(EV_LEFT, SRC_KEYBOARD);
+        break;
+    }
+}
+
+static void handle_input_byte(char key, KeyState *state)
+{
+    unsigned char ch = (unsigned char)key;
+
+    if (*state == KEY_NORMAL) {
+        if (ch == 0x1b) {
+            *state = KEY_ESCAPE;
+            return;
+        }
+
+        handle_key(key);
+        return;
+    }
+
+    if (*state == KEY_ESCAPE) {
+        if (ch == '[') {
+            *state = KEY_CSI;
+        } else if (ch == 'O') {
+            *state = KEY_SS3;
+        } else {
+            *state = KEY_NORMAL;
+            handle_key(key);
+        }
+        return;
+    }
+
+    if (*state == KEY_CSI) {
+        if (ch >= 0x40 && ch <= 0x7e) {
+            *state = KEY_NORMAL;
+            handle_arrow(key);
+        }
+        return;
+    }
+
+    if (*state == KEY_SS3) {
+        *state = KEY_NORMAL;
+        handle_arrow(key);
+    }
+}
+
 static void *keyboard_worker(void *arg)
 {
     (void)arg;
+
+    KeyState state = KEY_NORMAL;
 
     while (atomic_load(&keyboard_running)) {
         struct pollfd input = {
@@ -73,7 +140,7 @@ static void *keyboard_worker(void *arg)
         if (input.revents & POLLIN) {
             char key;
             if (read(STDIN_FILENO, &key, 1) == 1)
-                handle_key(key);
+                handle_input_byte(key, &state);
         }
     }
 
