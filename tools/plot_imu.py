@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 EV_NAMES = ["LEFT", "RIGHT", "JUMP", "CROUCH"]
 
 # same starting thresholds as gesture.c
-LEAN_DEG = 15
+LEAN_DEG = 20
 CROUCH_DEG = 25
 JUMP_G = 1.5
 
