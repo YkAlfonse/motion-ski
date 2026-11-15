@@ -16,7 +16,7 @@
 #define DEADZONE 1000
 #define REPEAT_MS 350
 #define INVERT_X 0
-#define INVERT_Y 1
+#define INVERT_Y 0
 
 static int fd = -1, btn = -1, cx = 2048, cy = 2048, last = -1;
 static uint64_t last_t;
