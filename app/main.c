@@ -172,7 +172,11 @@ int main(void)
         float dt = (current_time - previous_time) / 1000.0f;
         previous_time = current_time;
 
-        if (!game.over)
+	ImuWorkerStatus status = imu_worker_status();
+
+        if (!game.over &&
+            (status == IMU_WORKER_READY ||
+             status == IMU_WORKER_ERROR))
             game_update(&game, dt);
 
         if (current_time - last_draw >= 100) {
