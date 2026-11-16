@@ -68,6 +68,8 @@ Calibration learns three directions in sensor coordinates: up, right and forward
 - Quick calibration only re-measures up and the gyro offset, and keeps right and forward. If the IMU was moved too much since last time it carries on into the full calibration.
 - `gesture_set_axes()` loads saved axes and rejects ones that point the same way.
 
+The game saves the axes (and uses the saved sensitivity) through the settings file. The first start does the full calibration. After that each start only does the quick one, so the player just stands still for about 4 s. `motion_ski -c` ignores the saved axes and does the full calibration, for when the IMU is mounted differently.
+
 ## Tilt tracking
 
 A complementary filter keeps track of which way gravity points:
@@ -105,7 +107,7 @@ Sensitivity scales all thresholds:
 | Med | 1.0 | 20° | 25° | 1.5 g |
 | High | 0.75 | 15° | 18.75° | 1.375 g |
 
-All the public gesture functions share one mutex since the IMU thread and the menu call them from different threads. The game's IMU thread (`app/imu_worker.c`) runs `imu_read()` -> `gesture_update()` -> `events_push(ev, SRC_IMU)`.
+All the public gesture functions share one mutex since the IMU thread and the menu call them from different threads. The game's IMU thread (`app/imu_worker.c`) runs `imu_read()` -> `gesture_update()` -> `events_push(ev, SRC_IMU)`. If there's no good reading for 0.5 s (for example a loose wire) the game shows the IMU as unavailable and keeps going on the keyboard, and goes back once readings return.
 
 ## Latency
 
@@ -176,5 +178,4 @@ To be filled in from chest strap recordings: 10 of each gesture and 30 s standin
 - Chest strap recordings, threshold tuning and the accuracy table above
 - Time jump then lean on the strap and pick the game's top speed
 - Check 104 Hz and 0 failed reads through the EndPoints and Cat6 cable
-- Load saved axes at startup so only a quick calibration is needed
 - Possibly use the INT1 data-ready pin instead of polling STATUS
