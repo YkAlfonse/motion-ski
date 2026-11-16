@@ -273,10 +273,7 @@ int main(void)
     if (!joystick_available)
         fprintf(stderr, "Joystick unavailable; keyboard controls enabled\n");
 
-    bool imu_available = imu_worker_start();
-
-    if (!imu_available)
-        fprintf(stderr, "IMU worker unavailable; keyboard controls enabled\n");
+    bool imu_available = false;
 
     View view = VIEW_MENU;
     int menu_selection = 0;
@@ -300,10 +297,16 @@ int main(void)
                 continue;
 
             if (event.type == EV_BACK) {
-                if (view == VIEW_MENU)
+                if (view == VIEW_MENU) {
                     stop_requested = 1;
-                else
+                } else {
+                    if (view == VIEW_GAME) {
+                        imu_worker_stop();
+                        imu_available = false;
+                    }
+
                     view = VIEW_MENU;
+                }
 
                 continue;
             }
@@ -323,6 +326,11 @@ int main(void)
                     switch (menu_selection) {
                     case 0:
                         game_reset(&game, (unsigned)time(NULL));
+                        imu_available = imu_worker_start();
+
+                        if (!imu_available)
+                            fprintf(stderr, "IMU unavailable; keyboard controls enabled\n");
+
                         view = VIEW_GAME;
                         break;
                     case 1:
@@ -362,8 +370,14 @@ int main(void)
                 }
             } else if (view == VIEW_GAME) {
                 if (game.over) {
-                    if (event.type == EV_SELECT)
+                    if (event.type == EV_SELECT) {
+                        imu_worker_stop();
                         game_reset(&game, (unsigned)time(NULL));
+                        imu_available = imu_worker_start();
+
+                        if (!imu_available)
+                            fprintf(stderr, "IMU unavailable; keyboard controls enabled\n");
+                    }
                 } else if (event.type == EV_SELECT &&
                            imu_worker_status() ==
                            IMU_WORKER_CALIBRATION_FAILED) {
