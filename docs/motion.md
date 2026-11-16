@@ -107,7 +107,7 @@ Sensitivity scales all thresholds:
 | Med | 1.0 | 20° | 25° | 1.5 g |
 | High | 0.75 | 15° | 18.75° | 1.375 g |
 
-All the public gesture functions share one mutex since the IMU thread and the menu call them from different threads. The game's IMU thread (`app/imu_worker.c`) runs `imu_read()` -> `gesture_update()` -> `events_push(ev, SRC_IMU)`. If there's no good reading for 0.5 s (for example a loose wire) the game shows the IMU as unavailable and keeps going on the keyboard, and goes back once readings return.
+All the public gesture functions share one mutex since the IMU thread and the menu call them from different threads. The game's IMU thread (`app/imu_worker.c`) runs `imu_read()` -> `gesture_update()` -> `events_push(ev, SRC_IMU)`. If there's no good reading for 0.5 s during play (for example a loose wire) the game shows the IMU as unavailable and keeps going on the keyboard, and goes back once readings return. During calibration the game stays paused and calibration carries on when readings come back.
 
 ## Latency
 

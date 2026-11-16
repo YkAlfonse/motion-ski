@@ -82,9 +82,11 @@ static void *imu_worker(void *arg)
         ImuSample sample;
 
         if (!imu_read(&sample)) {
-            // no good reading for a while (loose wire), show it as unavailable
-            // instead of staying ready and doing nothing
-            if (!lost && now_ms() - last_ok > LOST_MS) {
+            // no good reading for a while during play (loose wire), show it
+            // as unavailable instead of staying ready and doing nothing.
+            // during calibration it stays calibrating so the game stays paused
+            if (!lost && status == IMU_WORKER_READY &&
+                now_ms() - last_ok > LOST_MS) {
                 lost = true;
                 before_lost = status;
                 atomic_store(&worker_status, IMU_WORKER_ERROR);
