@@ -8,8 +8,15 @@
 #include <sys/mman.h>
 #include <linux/fb.h>
 #include <linux/kd.h>
+#if __has_include(<drm/drm_mode.h>)
 #include <drm/drm.h>
 #include <drm/drm_mode.h>
+#define HAVE_DRM 1
+#elif __has_include(<libdrm/drm_mode.h>)
+#include <libdrm/drm.h>
+#include <libdrm/drm_mode.h>
+#define HAVE_DRM 1
+#endif
 #include "display.h"
 
 typedef enum { OUT_NONE, OUT_HEADLESS, OUT_FB, OUT_DRM } Out;
@@ -20,8 +27,10 @@ static uint8_t *mem, *base;
 static size_t size;
 static uint32_t ro = 16, go = 8, bo = 0;
 static uint8_t line[4096 * 4];
+#ifdef HAVE_DRM
 static uint32_t drm_handle, drm_fb, drm_conn;
 static struct drm_mode_crtc saved_crtc;
+#endif
 
 static void layout(void)
 {
@@ -57,7 +66,8 @@ static bool open_fb(void)
     return true;
 }
 
-static void *get(int req, void *arg) { return ioctl(fd, req, arg) ? NULL : arg; }
+#ifdef HAVE_DRM
+static void *get(unsigned long req, void *arg) { return ioctl(fd, req, arg) ? NULL : arg; }
 
 static bool pick_crtc(struct drm_mode_card_res *res, uint32_t *crtcs, struct drm_mode_get_connector *c, uint32_t *encs, uint32_t *crtc)
 {
@@ -135,6 +145,9 @@ static bool open_drm(void)
     }
     return false;
 }
+#else
+static bool open_drm(void) { return false; }
+#endif
 
 bool display_open(int w, int h)
 {
@@ -172,6 +185,7 @@ void display_present(const uint32_t *px)
 void display_close(void)
 {
     if (base) memset(base, 0, (size_t)pitch * yres);
+#ifdef HAVE_DRM
     if (out == OUT_DRM) {
         if (saved_crtc.mode_valid) {
             saved_crtc.set_connectors_ptr = (uintptr_t)&drm_conn;
@@ -182,7 +196,9 @@ void display_close(void)
         struct drm_mode_destroy_dumb dd = { drm_handle };
         if (mem) munmap(mem, size);
         ioctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &dd);
-    } else if (mem) munmap(mem, size);
+    } else
+#endif
+    if (mem) munmap(mem, size);
     if (tty >= 0) { ioctl(tty, KDSETMODE, KD_TEXT); close(tty); }
     if (fd >= 0) close(fd);
     fd = tty = -1;
