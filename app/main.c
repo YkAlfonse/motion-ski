@@ -6,6 +6,7 @@
 #include "events.h"
 #include "game.h"
 #include "keyboard.h"
+#include "storage.h"
 
 static volatile sig_atomic_t stop_requested = 0;
 
@@ -88,6 +89,7 @@ int main(void)
     signal(SIGTERM, handle_signal);
 
     events_init();
+    storage_init();
 
     Game game;
     game_reset(&game, (unsigned)time(NULL));
@@ -125,8 +127,11 @@ int main(void)
         float dt = (current_time - previous_time) / 1000.0f;
         previous_time = current_time;
 
-        if (!game.over)
-            game_update(&game, dt);
+        if (!game.over) {
+            int result = game_update(&game, dt);
+            if (result & GF_CRASH)
+                scores_add(game.score);
+        }
 
         if (current_time - last_draw >= 100) {
             draw_game(&game);
