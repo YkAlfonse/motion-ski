@@ -6,6 +6,7 @@
 #include "events.h"
 #include "game.h"
 #include "keyboard.h"
+#include "imu_worker.h"
 
 static volatile sig_atomic_t stop_requested = 0;
 
@@ -15,7 +16,26 @@ static void handle_signal(int signal_number)
     stop_requested = 1;
 }
 
-static void draw_game(const Game *g)
+static const char *calibration_instruction(CalPhase phase)
+{
+    switch (phase) {
+    case CAL_STILL:
+        return "Stand still and face forward";
+    case CAL_LEAN_RIGHT:
+        return "Lean right and hold";
+    case CAL_CENTER:
+        return "Return to center";
+    case CAL_BEND_FORWARD:
+        return "Bend forward and hold";
+    case CAL_RETURN:
+        return "Stand upright";
+    default:
+        return "Finishing calibration";
+    }
+}
+
+static void draw_game(const Game *g, ImuWorkerStatus imu_status,
+                      CalPhase cal_phase)
 {
     char road[10][LANES];
 
@@ -73,8 +93,29 @@ static void draw_game(const Game *g)
         pose = "CROUCH";
 
     printf("\nPlayer: %s\n", pose);
-    printf("R=Rock  B=Branch  T=Tree  $=Coin\n");
-    printf("A/D=Steer  W=Jump  S=Crouch  Q=Quit\n");
+    printf("A/D=Keyboard steer  W=Jump  S=Crouch  Q=Quit\n");
+
+    switch (imu_status) {
+    case IMU_WORKER_STARTING:
+        printf("IMU: Initializing sensor...\n");
+        break;
+    case IMU_WORKER_CALIBRATING:
+        printf("IMU CALIBRATION: %s\n",
+               calibration_instruction(cal_phase));
+        break;
+    case IMU_WORKER_READY:
+        printf("IMU: READY - lean left/right, jump or crouch\n");
+        break;
+    case IMU_WORKER_ERROR:
+        printf("IMU: UNAVAILABLE - keyboard controls remain active\n");
+        break;
+    case IMU_WORKER_CALIBRATION_FAILED:
+        printf("IMU: CALIBRATION FAILED - Press ENTER to retry\n");
+        break;
+    default:
+        printf("IMU: Stopped\n");
+        break;
+    }
 
     if (g->over)
         printf("\nGAME OVER! Press ENTER to restart.\n");
@@ -97,6 +138,9 @@ int main(void)
         return 1;
     }
 
+    if (!imu_worker_start())
+        fprintf(stderr, "IMU worker unavailable; keyboard controls remain active\n");
+
     uint64_t previous_time = now_ms();
     uint64_t last_draw = 0;
 
@@ -112,6 +156,9 @@ int main(void)
             if (game.over) {
                 if (event.type == EV_SELECT)
                     game_reset(&game, (unsigned)time(NULL));
+            } else if (event.type == EV_SELECT &&
+                       imu_worker_status() == IMU_WORKER_CALIBRATION_FAILED) {
+                imu_worker_retry_calibration();
             } else {
                 game_input(&game, event.type);
             }
@@ -125,17 +172,22 @@ int main(void)
         float dt = (current_time - previous_time) / 1000.0f;
         previous_time = current_time;
 
-        if (!game.over)
+	ImuWorkerStatus status = imu_worker_status();
+
+        if (!game.over &&
+            (status == IMU_WORKER_READY ||
+             status == IMU_WORKER_ERROR))
             game_update(&game, dt);
 
         if (current_time - last_draw >= 100) {
-            draw_game(&game);
+            draw_game(&game, imu_worker_status(), imu_worker_cal_phase());
             last_draw = current_time;
         }
 
         sleep_ms(16);
     }
 
+    imu_worker_stop();
     keyboard_stop();
 
     printf("\nMotion Ski closed successfully.\n");
