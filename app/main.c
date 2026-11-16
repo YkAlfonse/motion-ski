@@ -7,6 +7,7 @@
 #include "game.h"
 #include "keyboard.h"
 #include "imu_worker.h"
+#include "storage.h"
 
 static volatile sig_atomic_t stop_requested = 0;
 
@@ -129,6 +130,7 @@ int main(void)
     signal(SIGTERM, handle_signal);
 
     events_init();
+    storage_init();
 
     Game game;
     game_reset(&game, (unsigned)time(NULL));
@@ -172,12 +174,16 @@ int main(void)
         float dt = (current_time - previous_time) / 1000.0f;
         previous_time = current_time;
 
-	ImuWorkerStatus status = imu_worker_status();
+        ImuWorkerStatus status = imu_worker_status();
 
         if (!game.over &&
             (status == IMU_WORKER_READY ||
-             status == IMU_WORKER_ERROR))
-            game_update(&game, dt);
+             status == IMU_WORKER_ERROR)) {
+            int result = game_update(&game, dt);
+
+            if (result & GF_CRASH)
+                scores_add(game.score);
+        }
 
         if (current_time - last_draw >= 100) {
             draw_game(&game, imu_worker_status(), imu_worker_cal_phase());
