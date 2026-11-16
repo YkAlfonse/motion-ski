@@ -18,6 +18,18 @@ cp ~/ensc351/public/myApps/motion-ski/*.csv data/
 python3 tools/plot_imu.py data/*.csv
 ```
 
+## Replay
+
+`gesture_replay` runs a recording back through the current gesture code on the PC, so thresholds can be changed and checked without recording again.
+
+```bash
+./build/gesture_replay data/jump_sehaj_01.csv        # every event, then a summary
+./build/gesture_replay -q data/*.csv                 # summary only
+./build/gesture_replay -s high data/left_sehaj_01.csv
+```
+
+The summary shows the events from when it was recorded next to the events the current code finds. Files recorded with `-g` use their `# axes` line. Raw files only work if they start with the calibration moves.
+
 ## Names
 
 `<gesture>_<person>_<nn>.csv`, for example `jump_sehaj_01.csv`.
