@@ -24,7 +24,8 @@ static bool load_saved(void)
 
     gesture_set_sensitivity(s.sensitivity);
 
-    if (atomic_load(&force_full) || !s.has_axes)
+    // -c only forces the next calibration, later rounds use the new saved axes
+    if (atomic_exchange(&force_full, false) || !s.has_axes)
         return false;
 
     // rejects axes that don't make sense

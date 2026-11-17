@@ -12,7 +12,7 @@ typedef enum {
     IMU_WORKER_CALIBRATION_FAILED
 } ImuWorkerStatus;
 
-// call before start to ignore saved axes and do the full calibration
+// call before start so the next calibration ignores saved axes and is a full one
 void imu_worker_force_full(void);
 bool imu_worker_start(void);
 void imu_worker_stop(void);
