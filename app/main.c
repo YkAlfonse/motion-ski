@@ -1,6 +1,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "common.h"
 #include "events.h"
@@ -124,8 +125,20 @@ static void draw_game(const Game *g, ImuWorkerStatus imu_status,
     fflush(stdout);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    int opt;
+
+    // -c redoes the full IMU calibration instead of using the saved one
+    while ((opt = getopt(argc, argv, "c")) != -1) {
+        if (opt == 'c') {
+            imu_worker_force_full();
+        } else {
+            fprintf(stderr, "usage: %s [-c]\n", argv[0]);
+            return 1;
+        }
+    }
+
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
 
