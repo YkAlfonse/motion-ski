@@ -242,6 +242,35 @@ int main(void)
     hold(1.0f, 0);
     expect("landing dip", 0, 0, 1, 0);
 
+    // stopping hard at the bottom of a deep crouch spikes up, not a jump
+    move_to(0, 40, 0.3f);
+    hold(0.06f, 0.8f);
+    hold(0.5f, 0);
+    move_to(0, 0, 0.3f);
+    hold(1.0f, 0);
+    // standing up fast out of a deep crouch, same thing
+    move_to(0, 40, 0.3f);
+    hold(0.5f, 0);
+    for (int i = 0; i < 6; i++) {
+        cur_pitch -= 2.0f;
+        step(0.8f);
+    }
+    move_to(0, 0, 0.3f);
+    hold(1.0f, 0);
+    expect("deep crouch spikes", 0, 0, 0, 2);
+
+    // dipping past the crouch angle before a jump still jumps
+    move_to(0, 30, 0.2f);
+    hold(0.05f, 0);
+    for (int i = 0; i < 10; i++) {
+        cur_pitch -= 3.0f;
+        step(1.0f);
+    }
+    hold(0.35f, -0.95f);
+    hold(0.1f, 1.5f);
+    hold(1.0f, 0);
+    expect("jump from a deep dip", 0, 0, 1, 1);
+
     // crouch that drifts sideways past the lean angle is still just a crouch
     lean_and_back(22, 35);
     expect("sideways crouch", 0, 0, 0, 1);
