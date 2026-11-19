@@ -11,6 +11,7 @@
 #include "joystick.h"
 #include "keyboard.h"
 #include "storage.h"
+#include "tilt_meter.h"
 
 typedef enum {
     VIEW_MENU,
@@ -232,6 +233,7 @@ static void draw_game(const Game *g, ImuWorkerStatus imu_status,
         break;
     case IMU_WORKER_READY:
         printf("IMU: READY - lean left/right, jump or crouch\n");
+        tilt_meter_print();
         break;
     case IMU_WORKER_ERROR:
         printf("IMU: UNAVAILABLE - keyboard controls remain active\n");
