@@ -33,12 +33,26 @@ The IMU can be mounted at any angle since calibration learns its orientation. It
 | CTRL3_C (0x12) | 0x01 then 0x44 | software reset, then block data update + address auto increment |
 | CTRL1_XL (0x10) | 0x48 | accel 104 Hz, ±4 g |
 | CTRL2_G (0x11) | 0x44 | gyro 104 Hz, 500 dps |
-| STATUS (0x1E) | XLDA, GDA bits | new accel and gyro data ready |
-| OUTX_L_G (0x22) | 12 bytes | gyro x,y,z then accel x,y,z, little endian |
+| FIFO_CTRL3 (0x09) | 0x44 | batch gyro and accel into the FIFO at 104 Hz |
+| FIFO_CTRL4 (0x0A) | 0x00 then 0x06 | bypass to clear it, then continuous mode |
+| STATUS (0x1E) | XLDA, GDA bits | new accel and gyro data ready (polling only) |
+| OUTX_L_G (0x22) | 12 bytes | gyro x,y,z then accel x,y,z, little endian (polling only) |
+| FIFO_STATUS1/2 (0x3A) | 2 bytes | number of words waiting, overrun flag |
+| FIFO_DATA_OUT (0x78) | 7 bytes per word | tag byte, then x,y,z of one sensor |
 
 - After the reset it reads CTRL1/CTRL2 back to make sure the writes went through, then waits 80 ms for the gyro to start.
-- `imu_read()` polls STATUS until both data-ready bits are set (up to 20 ms), so the same sample is never returned twice.
 - Scaling: 0.122 mg/LSB and 17.5 mdps/LSB, from the datasheet for these ranges.
+
+### FIFO
+
+The chip stores every sample in its own FIFO (about 2 s worth), so samples aren't lost if the program is late to read them.
+
+- `imu_read()` reads the words waiting in the FIFO (up to 32 at a time) into a queue and returns one sample per call.
+- Each word has a tag: the sensor (gyro or accel) and a 2-bit slot counter. A gyro and an accel word with the same counter become one sample. If the counter jumps, a slot was missed.
+- Timestamps step exactly 1/104 s from the last sample and slowly follow the board clock so they don't drift. The filter uses these gaps to integrate the gyro, so even steps help. After an overrun the timing starts over.
+- If the FIFO setup doesn't read back right, it falls back to polling. `IMU_NO_FIFO=1` forces polling, which is how the two were compared.
+
+Polling (the old way) checks STATUS until both data-ready bits are set (up to 20 ms) and reads the 12 output bytes, stamped with the board clock when read.
 
 Board test (`sudo ./imu_log -t 10`, board still on a desk):
 
@@ -48,6 +62,23 @@ imu: LSM6DSOX at 0x6A
 ```
 
 Sitting flat it read about 1.03 g on z with the gyro near 0 (about 1 deg/s offset on x, which calibration removes).
+
+FIFO vs polling (`imu_log -t 10`, 10 s each, IMU still). "Timing off" is how far each gap between timestamps is from 1/104 s. The average can't go below about 0.5 ms since timestamps are whole ms.
+
+| | Polling | FIFO |
+| --- | --- | --- |
+| Rate | 103.5 Hz | 103.5 Hz |
+| Missed samples | 0 | 0 |
+| Timing off, avg / worst | 0.5 / 2.6 ms | 0.5 / 0.6 ms |
+
+Same test, with `imu_log` frozen for 1 s partway through (`kill -STOP`, then `kill -CONT`), like the thread getting stuck:
+
+| | Polling | FIFO |
+| --- | --- | --- |
+| Samples | 933 (93.2 Hz) | 1035 (103.5 Hz) |
+| Missed samples | 104 | 0 |
+
+Running 4 busy processes at the same time made no difference to either, since the board has 4 cores. Gestures and the full game were also checked on FIFO.
 
 ## Calibration
 
@@ -114,6 +145,7 @@ All the public gesture functions share one mutex since the IMU thread and the me
 | Step | Time |
 | --- | --- |
 | New sample | every 9.6 ms (104 Hz) |
+| Waiting in the FIFO before it's read | up to about 2 ms |
 | Lean or crouch after crossing the threshold | about 29 ms |
 | Jump after the push off starts | about 19 ms |
 | Player leaning past 20° | about 0.2 s (estimate) |
@@ -124,7 +156,7 @@ Jumping and then changing lanes takes about 0.8 s (land, settle, lean). At the g
 
 | Tool | Runs on | Use |
 | --- | --- | --- |
-| `imu_log` | board | records CSV, `-g` calibrates first and prints gestures live, `-t` stops after a time |
+| `imu_log` | board | records CSV, `-g` calibrates first and prints gestures live, `-t` stops after a time. The summary shows the rate, missed samples and timing |
 | `plot_imu.py` | PC | plots accel, gyro, roll/pitch and up with the thresholds and events |
 | `gesture_replay` | PC | runs a recording back through the current gesture code and compares the events |
 | `gesture_test` | PC | simulated IMU tests, no board needed |
@@ -178,4 +210,5 @@ To be filled in from chest strap recordings: 10 of each gesture and 30 s standin
 - Chest strap recordings, threshold tuning and the accuracy table above
 - Time jump then lean on the strap and pick the game's top speed
 - Check 104 Hz and 0 failed reads through the EndPoints and Cat6 cable
-- Possibly use the INT1 data-ready pin instead of polling STATUS
+- A very fast crouch (hand held) once fired a JUMP from the stop at the bottom. Check on the strap, and if it still happens block jumps while bent forward
+- INT1 (data-ready pin) would only work on short wires, since the EndPoint cable only carries I²C and power

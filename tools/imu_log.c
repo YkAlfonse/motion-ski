@@ -83,7 +83,10 @@ int main(int argc, char **argv)
     printf("t_ms,ax,ay,az,gx,gy,gz,roll,pitch,up,ev\n");
 
     uint64_t start = now_ms(), first = 0, last = 0;
-    unsigned long n = 0, fails = 0;
+    unsigned long n = 0, fails = 0, missed = 0;
+    // how far each gap between samples is from 1/104 s
+    double period = 1000.0 / 104.0, off_sum = 0, off_max = 0;
+    unsigned long gaps = 0;
 
     while (g_running) {
         ImuSample s;
@@ -108,8 +111,21 @@ int main(int argc, char **argv)
         if (ev >= 0 && ev < EV_COUNT)
             fprintf(stderr, "%s\n", ev_names[ev]);
 
-        if (n == 0)
+        if (n == 0) {
             first = s.t_ms;
+        } else {
+            double dt = (double)(s.t_ms - last);
+            if (dt > 1.5 * period) {
+                // a gap this big means samples were skipped
+                missed += (unsigned long)(dt / period + 0.5) - 1;
+            } else {
+                double off = dt > period ? dt - period : period - dt;
+                off_sum += off;
+                if (off > off_max)
+                    off_max = off;
+                gaps++;
+            }
+        }
         last = s.t_ms;
         n++;
     }
@@ -119,5 +135,7 @@ int main(int argc, char **argv)
     double span = (last - first) / 1000.0;
     fprintf(stderr, "%lu samples in %.1f s (%.1f Hz), %lu failed reads\n", n, span,
             span > 0 ? (n - 1) / span : 0.0, fails);
+    fprintf(stderr, "%lu missed samples, timing off by %.1f ms avg, %.1f ms worst\n",
+            missed, gaps ? off_sum / gaps : 0.0, off_max);
     return 0;
 }
