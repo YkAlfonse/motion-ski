@@ -98,6 +98,7 @@ Rules to stop false triggers, each added after something went wrong in board tes
 - No leans or crouches while in the air or until the landing settles (150 ms of calm).
 - No crouch until the jump is over, since a landing dips forward. The game can't crouch mid jump anyway.
 - A second jump can't fire within 0.7 s, the same as the game's jump time. This stops a landing bounce from counting twice.
+- No jump while bent forward past 35°, or within 150 ms of it. Stopping hard at the bottom of a deep crouch or standing up fast out of one pushes up like a jump. Real jumps start from a smaller dip, and in testing fired at 17-31°.
 
 Sensitivity scales all thresholds:
 
@@ -133,12 +134,13 @@ See `data/README.md` for the recording and replay commands.
 
 ## Testing
 
-`gesture_test` simulates an IMU mounted at a tilt, with noise and a gyro offset, and checks 22 cases:
+`gesture_test` simulates an IMU mounted at a tilt, with noise and a gyro offset, and checks 24 cases:
 
 - calibration finds the right axes, including starting hunched over and a new mounting angle
 - standing still and small sway fire nothing
 - each lean, crouch and jump fires exactly once, and holding a lean doesn't repeat
 - a wobble in the air, a forward dip after landing, a crouch drifting sideways and leaning back with drift don't fire a lean or crouch
+- a hard stop at the bottom of a deep crouch and standing up fast don't fire a jump, but a jump from a dip past the crouch angle still does
 - sensitivity levels, quick calibration, cancel, saved axes and rejected axes
 
 Board testing with `imu_log -g` (IMU held on a breadboard against the chest) found these problems, which were fixed and checked with replay:
@@ -151,6 +153,7 @@ Board testing with `imu_log -g` (IMU held on a breadboard against the chest) fou
 | LEFT/RIGHT fired mid jump | body wobble while in the air | ignore tilt until the landing settles |
 | JUMP counted twice | landing bounce | 0.7 s between jumps |
 | CROUCH after landing | landing dips forward | no crouch until the jump is over |
+| JUMP during fast crouches | stop at the bottom spiked past 1.5 g, bent 35-47° | no jump while bent past 35° (replay: 5 fake jumps gone, real ones kept) |
 
 Replaying the first recording (made before these fixes) with the current code:
 

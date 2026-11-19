@@ -46,6 +46,10 @@
 // same as the game's jump time, also stops a landing bounce counting twice
 #define JUMP_MIN_MS 700
 #define JUMP_MAX_MS 1500
+// stopping at the bottom of a deep crouch or standing up fast pushes up like
+// a jump. real jumps in testing fired under 31 deg, fake ones over 35
+#define JUMP_MAX_PITCH_DEG 35.0f
+#define BENT_MS 150
 
 typedef struct {
     float x, y, z;
@@ -81,8 +85,8 @@ static float scale = 1.0f;
 
 static int lean_n, crouch_n, jump_n;
 static int lean_side;
-static bool crouch_down, in_air;
-static uint64_t jump_t, settle_t;
+static bool crouch_down, in_air, was_bent;
+static uint64_t jump_t, settle_t, bent_t;
 
 static vec3 v3(float x, float y, float z)
 {
@@ -147,7 +151,7 @@ static void reset_tracking(void)
     filt_init = false;
     lean_n = crouch_n = jump_n = 0;
     lean_side = 0;
-    crouch_down = in_air = false;
+    crouch_down = in_air = was_bent = false;
     roll_deg = pitch_deg = 0;
     up_g = 1.0f;
 }
@@ -320,9 +324,15 @@ static int detect(uint64_t t)
     float jump_g = 1.0f + (JUMP_G - 1.0f) * scale;
     bool settling = false;
 
+    if (pitch_deg > JUMP_MAX_PITCH_DEG) {
+        was_bent = true;
+        bent_t = t;
+    }
+    bool bent = was_bent && t - bent_t < BENT_MS;
+
     // jump fires on the push off, then waits for the landing to settle
     if (!in_air) {
-        jump_n = up_g > jump_g ? jump_n + 1 : 0;
+        jump_n = (up_g > jump_g && !bent) ? jump_n + 1 : 0;
         if (jump_n >= JUMP_HOLD_N) {
             in_air = true;
             jump_t = settle_t = t;
