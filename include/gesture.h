@@ -13,3 +13,4 @@ void gesture_cancel(void);
 void gesture_set_sensitivity(int level);
 int gesture_update(const ImuSample *s);
 void gesture_debug(float *roll, float *pitch, float *up);
+void gesture_thresholds(float *lean, float *crouch);

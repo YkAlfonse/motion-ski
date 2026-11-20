@@ -515,3 +515,14 @@ void gesture_debug(float *roll, float *pitch, float *up_out)
         *up_out = up_g;
     pthread_mutex_unlock(&mtx);
 }
+
+// lean and crouch trigger angles with the sensitivity applied
+void gesture_thresholds(float *lean, float *crouch)
+{
+    pthread_mutex_lock(&mtx);
+    if (lean)
+        *lean = LEAN_ON_DEG * scale;
+    if (crouch)
+        *crouch = CROUCH_ON_DEG * scale;
+    pthread_mutex_unlock(&mtx);
+}
