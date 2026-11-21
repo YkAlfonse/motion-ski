@@ -188,9 +188,13 @@ static bool fill_queue(void)
     bool overrun = st[1] & FIFO_OVR;
     int n = words < BATCH_WORDS ? words : BATCH_WORDS;
 
-    // samples were lost, start the timing over
-    if (overrun)
+    // samples were lost, start over so an old half sample isn't paired with
+    // a new word that has the same slot counter
+    if (overrun) {
         t_est = 0;
+        have_g = have_a = false;
+        part_cnt = last_cnt = -1;
+    }
 
     for (int i = 0; i < n; i++) {
         if (!reg_read(REG_FIFO_DATA, w, sizeof w))

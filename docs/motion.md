@@ -45,11 +45,11 @@ The IMU can be mounted at any angle since calibration learns its orientation. It
 
 ### FIFO
 
-The chip stores every sample in its own FIFO (about 2 s worth), so samples aren't lost if the program is late to read them.
+The chip stores every sample in its own FIFO (about 2.4 s worth, measured), so samples aren't lost if the program is late to read them.
 
 - `imu_read()` reads the words waiting in the FIFO (up to 32 at a time) into a queue and returns one sample per call.
 - Each word has a tag: the sensor (gyro or accel) and a 2-bit slot counter. A gyro and an accel word with the same counter become one sample. If the counter jumps, a slot was missed.
-- Timestamps step exactly 1/104 s from the last sample and slowly follow the board clock so they don't drift. The filter uses these gaps to integrate the gyro, so even steps help. After an overrun the timing starts over.
+- Timestamps step exactly 1/104 s from the last sample and slowly follow the board clock so they don't drift. The filter uses these gaps to integrate the gyro, so even steps help. After an overrun the timing starts over and any half built sample is dropped, so a word from before the gap can't be paired with one after it.
 - If the FIFO setup doesn't read back right, it falls back to polling. `IMU_NO_FIFO=1` forces polling, which is how the two were compared.
 
 Polling (the old way) checks STATUS until both data-ready bits are set (up to 20 ms) and reads the 12 output bytes, stamped with the board clock when read.
@@ -77,6 +77,8 @@ Same test, with `imu_log` frozen for 1 s partway through (`kill -STOP`, then `ki
 | --- | --- | --- |
 | Samples | 933 (93.2 Hz) | 1035 (103.5 Hz) |
 | Missed samples | 104 | 0 |
+
+Frozen for 10 s instead (`imu_log -t 20`), so the FIFO overruns: 1289 samples plus 786 counted as missed (2080 expected), 0 failed reads, and the samples right after the gap were normal. The FIFO held about 2.4 s of the 10 s.
 
 Running 4 busy processes at the same time made no difference to either, since the board has 4 cores. Gestures and the full game were also checked on FIFO.
 
