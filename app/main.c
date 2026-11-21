@@ -1,5 +1,6 @@
 #include <signal.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -15,6 +16,7 @@
 
 typedef enum {
     VIEW_MENU,
+    VIEW_NAME,
     VIEW_GAME,
     VIEW_SCORES,
     VIEW_SETTINGS
@@ -80,10 +82,54 @@ static void draw_menu(int selected)
     fflush(stdout);
 }
 
+static void change_name_character(char name[MAX_USERNAME + 1], int cursor, int direction)
+{
+    const char *characters = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-";
+    const char *current = strchr(characters, name[cursor]);
+    int count = (int)strlen(characters);
+    int index = current ? (int)(current - characters) : 0;
+    name[cursor] = characters[move_selection(index, count, direction)];
+}
+
+static bool finish_name(const char draft[MAX_USERNAME + 1],
+                        char result[MAX_USERNAME + 1])
+{
+    memcpy(result, draft, MAX_USERNAME);
+    result[MAX_USERNAME] = '\0';
+
+    int length = MAX_USERNAME;
+
+    while (length > 0 && result[length - 1] == ' ')
+        result[--length] = '\0';
+
+    if (length == 0)
+        return false;
+
+    return strchr(result, ' ') == NULL;
+}
+
+static void draw_name(const char name[MAX_USERNAME + 1], int cursor, bool invalid)
+{
+    clear_screen();
+
+    printf("========== PLAYER NAME ==========\n\n");
+    printf("Name: [%.12s]\n", name);
+    printf("       %*s^\n", cursor, "");
+
+    printf("\nKeyboard: Type name, Backspace: Delete\n");
+    printf("Joystick: Up/Down letters, Left/Right position\n");
+    printf("ENTER/Button: Start Game    ESC: Back\n");
+
+    if (invalid)
+        printf("\nChoose a name without spaces between letters.\n");
+
+    fflush(stdout);
+}
+
 static void draw_scores(void)
 {
-    int scores[MAX_SCORES];
-    int count = scores_get(scores);
+    ScoreEntry scores[MAX_SCORES];
+    int count = scores_get_named(scores);
 
     clear_screen();
 
@@ -93,7 +139,7 @@ static void draw_scores(void)
         printf("No high scores yet.\n");
     } else {
         for (int i = 0; i < count && i < MAX_SCORES; i++)
-            printf("%2d. %8d\n", i + 1, scores[i]);
+            printf("%2d. %-12s %8d\n", i + 1, scores[i].name, scores[i].score);
     }
 
     printf("\nENTER or Q: Return to menu\n");
@@ -293,11 +339,49 @@ int main(int argc, char **argv)
     View view = VIEW_MENU;
     int menu_selection = 0;
     int settings_selection = 0;
+    char player_name[MAX_USERNAME + 1] = "PLAYER";
+    char name_edit[MAX_USERNAME + 1];
+    int name_cursor = 0;
+    bool invalid_name = false;
+    bool keyboard_name_started = false;
 
     uint64_t previous_time = now_ms();
     uint64_t last_draw = 0;
 
     while (!stop_requested) {
+        if (view == VIEW_NAME) {
+            char key;
+
+            while (keyboard_pop_name_key(&key)) {
+                if (!keyboard_name_started) {
+                    memset(name_edit, ' ', MAX_USERNAME);
+                    name_edit[MAX_USERNAME] = '\0';
+                    name_cursor = 0;
+                    keyboard_name_started = true;
+                }
+
+                int length = 0;
+
+                while (length < MAX_USERNAME &&
+                       name_edit[length] != ' ')
+                    length++;
+
+                if (key == '\b') {
+                    if (length > 0) {
+                        name_edit[length - 1] = ' ';
+                        name_cursor = length - 1;
+                    }
+                } else if (length < MAX_USERNAME) {
+                    name_edit[length] = key;
+                    name_cursor = length + 1 < MAX_USERNAME
+                                      ? length + 1
+                                      : MAX_USERNAME - 1;
+                }
+
+                invalid_name = false;
+            }
+        }
+
         if (joystick_available) {
             int input = joystick_poll();
 
@@ -320,6 +404,9 @@ int main(int argc, char **argv)
                         imu_available = false;
                     }
 
+                    if (view == VIEW_NAME)
+                        keyboard_set_name_mode(false);
+
                     view = VIEW_MENU;
                 }
 
@@ -340,13 +427,14 @@ int main(int argc, char **argv)
                 } else if (event.type == EV_SELECT) {
                     switch (menu_selection) {
                     case 0:
-                        game_reset(&game, (unsigned)time(NULL));
-                        imu_available = imu_worker_start();
-
-                        if (!imu_available)
-                            fprintf(stderr, "IMU unavailable; keyboard controls enabled\n");
-
-                        view = VIEW_GAME;
+                        memset(name_edit, ' ', MAX_USERNAME);
+                        memcpy(name_edit, player_name, strlen(player_name));
+                        name_edit[MAX_USERNAME] = '\0';
+                        name_cursor = 0;
+                        invalid_name = false;
+                        keyboard_name_started = false;
+                        keyboard_set_name_mode(true);
+                        view = VIEW_NAME;
                         break;
                     case 1:
                         view = VIEW_SCORES;
@@ -359,6 +447,34 @@ int main(int argc, char **argv)
                     case 3:
                         stop_requested = 1;
                         break;
+                    }
+                }
+            } else if (view == VIEW_NAME) {
+                if (event.type == EV_UP || event.type == EV_JUMP) {
+                    change_name_character(name_edit, name_cursor, 1);
+                    invalid_name = false;
+                } else if (event.type == EV_DOWN || event.type == EV_CROUCH) {
+                    change_name_character(name_edit, name_cursor, -1);
+                    invalid_name = false;
+                } else if (event.type == EV_LEFT) {
+                    name_cursor = move_selection(name_cursor, MAX_USERNAME, -1);
+                } else if (event.type == EV_RIGHT) {
+                    name_cursor = move_selection(name_cursor, MAX_USERNAME, 1);
+                } else if (event.type == EV_SELECT) {
+                    char chosen[MAX_USERNAME + 1];
+
+                    if (!finish_name(name_edit, chosen)) {
+                        invalid_name = true;
+                    } else {
+                        keyboard_set_name_mode(false);
+                        strcpy(player_name, chosen);
+                        game_reset(&game, (unsigned)time(NULL));
+                        imu_available = imu_worker_start();
+
+                        if (!imu_available)
+                            fprintf(stderr, "IMU unavailable; keyboard controls enabled\n");
+
+                        view = VIEW_GAME;
                     }
                 }
             } else if (view == VIEW_SCORES) {
@@ -407,7 +523,7 @@ int main(int argc, char **argv)
                         int flags = game_input(&game, event.type);
 
                         if (flags & GF_CRASH)
-                            scores_add(game.score);
+                            scores_add_named(player_name, game.score);
                     }
                 }
             }
@@ -432,13 +548,16 @@ int main(int argc, char **argv)
             int flags = game_update(&game, dt);
 
             if (flags & GF_CRASH)
-                scores_add(game.score);
+                scores_add_named(player_name, game.score);
         }
 
         if (current_time - last_draw >= 100) {
             switch (view) {
             case VIEW_MENU:
                 draw_menu(menu_selection);
+                break;
+            case VIEW_NAME:
+                draw_name(name_edit, name_cursor, invalid_name);
                 break;
             case VIEW_GAME:
                 draw_game(&game, status, imu_worker_cal_phase());
