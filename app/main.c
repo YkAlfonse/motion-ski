@@ -428,7 +428,6 @@ int main(int argc, char **argv)
                     switch (menu_selection) {
                     case 0:
                         memset(name_edit, ' ', MAX_USERNAME);
-                        memcpy(name_edit, player_name, strlen(player_name));
                         name_edit[MAX_USERNAME] = '\0';
                         name_cursor = 0;
                         invalid_name = false;

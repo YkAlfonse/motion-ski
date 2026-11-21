@@ -66,6 +66,30 @@ int main(void)
     assert(scores_get_named(named) == MAX_SCORES);
     assert(named[0].score == 150);
 
+    assert(scores_add_named("ALFONSE", 140) == -1);
+    assert(scores_add_named("ALFONSE", 175) == 0);
+    assert(scores_add_named("SEHAJ", 126) == 1);
+
+    assert(scores_get_named(named) == MAX_SCORES);
+    assert(named[0].score == 175);
+    assert(strcmp(named[0].name, "ALFONSE") == 0);
+    assert(named[1].score == 126);
+    assert(strcmp(named[1].name, "SEHAJ") == 0);
+
+    int alfonse_count = 0;
+    int sehaj_count = 0;
+
+    for (int i = 0; i < MAX_SCORES; i++) {
+        if (strcmp(named[i].name, "ALFONSE") == 0)
+            alfonse_count++;
+
+        if (strcmp(named[i].name, "SEHAJ") == 0)
+            sehaj_count++;
+    }
+
+    assert(alfonse_count == 1);
+    assert(sehaj_count == 1);
+
     Settings saved = {
         .sound = false,
         .sensitivity = 2,

@@ -152,6 +152,27 @@ static int read_entries(ScoreEntry entries[MAX_SCORES])
                 continue;
         }
 
+        if (strcmp(entry.name, "PLAYER") != 0) {
+            int existing = -1;
+
+            for (int i = 0; i < count; i++) {
+                if (strcmp(entries[i].name, entry.name) == 0) {
+                    existing = i;
+                    break;
+                }
+            }
+
+            if (existing >= 0) {
+                if (entries[existing].score >= entry.score)
+                    continue;
+
+                for (int i = existing; i < count - 1; i++)
+                    entries[i] = entries[i + 1];
+
+                count--;
+            }
+        }
+
         int pos = 0;
 
         while (pos < count && entries[pos].score >= entry.score)
@@ -249,6 +270,23 @@ int scores_add_named(const char *name, int score)
 
     ScoreEntry entries[MAX_SCORES];
     int count = read_entries(entries);
+
+    if (strcmp(entry.name, "PLAYER") != 0) {
+        for (int i = 0; i < count; i++) {
+            if (strcmp(entries[i].name, entry.name) != 0)
+                continue;
+
+            if (entries[i].score >= score)
+                return -1;
+
+            for (int j = i; j < count - 1; j++)
+                entries[j] = entries[j + 1];
+
+            count--;
+            break;
+        }
+    }
+
     int pos = 0;
 
     while (pos < count && entries[pos].score >= score)
