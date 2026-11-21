@@ -58,6 +58,8 @@
 #define BATCH_WORDS 32
 #define QUEUE_LEN (BATCH_WORDS / 2)
 #define PERIOD_MS (1000.0 / 104.0)
+// more than ~0.25 s waiting is too old to use
+#define STALE_WORDS 52
 
 static int fd = -1;
 static uint16_t addr;
@@ -134,6 +136,14 @@ static bool configure(void)
     return true;
 }
 
+// forget any half built sample and start the timing over
+static void reset_fifo_state(void)
+{
+    have_g = have_a = false;
+    part_cnt = last_cnt = -1;
+    t_est = 0;
+}
+
 static bool setup_fifo(void)
 {
     uint8_t c3 = 0, c4 = 0;
@@ -147,9 +157,7 @@ static bool setup_fifo(void)
         return false;
 
     q_head = q_len = 0;
-    have_g = have_a = false;
-    part_cnt = last_cnt = -1;
-    t_est = 0;
+    reset_fifo_state();
     return c3 == FIFO_CTRL3_VAL && c4 == FIFO_CTRL4_VAL;
 }
 
@@ -159,11 +167,18 @@ static void stamp(ImuSample *s, double target, int skipped)
 {
     double step = PERIOD_MS * (1 + skipped);
 
-    if (t_est == 0 || target - (t_est + step) > 100 ||
-        target - (t_est + step) < -100)
+    if (t_est == 0) {
         t_est = target;
-    else
-        t_est += step + (target - (t_est + step)) * 0.02;
+    } else {
+        // target can be way off if the thread stalls between reading the
+        // status and the clock. clamped so it never goes backwards
+        double err = target - (t_est + step);
+        if (err > 100)
+            err = 100;
+        if (err < -100)
+            err = -100;
+        t_est += step + err * 0.02;
+    }
     s->t_ms = (uint64_t)(t_est + 0.5);
 }
 
@@ -188,12 +203,16 @@ static bool fill_queue(void)
     bool overrun = st[1] & FIFO_OVR;
     int n = words < BATCH_WORDS ? words : BATCH_WORDS;
 
-    // samples were lost, start over so an old half sample isn't paired with
-    // a new word that has the same slot counter
-    if (overrun) {
-        t_est = 0;
-        have_g = have_a = false;
-        part_cnt = last_cnt = -1;
+    // reading fell behind (stuck thread, failed calibration waiting) or it
+    // overran. old samples would only give late gestures or calibrate on old
+    // data, so empty it (bypass then continuous) and wait for fresh ones.
+    // this also stops an old half sample pairing with a new word
+    if (overrun || words > STALE_WORDS) {
+        if (!reg_write(REG_FIFO_CTRL4, FIFO_BYPASS) ||
+            !reg_write(REG_FIFO_CTRL4, FIFO_CTRL4_VAL))
+            return false;
+        reset_fifo_state();
+        return true;
     }
 
     for (int i = 0; i < n; i++) {

@@ -45,11 +45,12 @@ The IMU can be mounted at any angle since calibration learns its orientation. It
 
 ### FIFO
 
-The chip stores every sample in its own FIFO (about 2.4 s worth, measured), so samples aren't lost if the program is late to read them.
+The chip stores every sample in its own FIFO (it can hold about 2.4 s, measured), so samples aren't lost if the program is a bit late to read them.
 
 - `imu_read()` reads the words waiting in the FIFO (up to 32 at a time) into a queue and returns one sample per call.
 - Each word has a tag: the sensor (gyro or accel) and a 2-bit slot counter. A gyro and an accel word with the same counter become one sample. If the counter jumps, a slot was missed.
-- Timestamps step exactly 1/104 s from the last sample and slowly follow the board clock so they don't drift. The filter uses these gaps to integrate the gyro, so even steps help. After an overrun the timing starts over and any half built sample is dropped, so a word from before the gap can't be paired with one after it.
+- Timestamps step exactly 1/104 s from the last sample and slowly follow the board clock so they don't drift. The filter uses these gaps to integrate the gyro, so even steps help.
+- If more than about 0.25 s is waiting (52 words) or it overran, the FIFO is emptied (bypass, then continuous again) and reading starts over with fresh samples. Old samples would only fire gestures late, or make a retried calibration use data from while the player was walking back. Any half built sample is dropped too, so a word from before the gap can't be paired with one after it.
 - If the FIFO setup doesn't read back right, it falls back to polling. `IMU_NO_FIFO=1` forces polling, which is how the two were compared.
 
 Polling (the old way) checks STATUS until both data-ready bits are set (up to 20 ms) and reads the 12 output bytes, stamped with the board clock when read.
@@ -71,14 +72,16 @@ FIFO vs polling (`imu_log -t 10`, 10 s each, IMU still). "Timing off" is how far
 | Missed samples | 0 | 0 |
 | Timing off, avg / worst | 0.5 / 2.6 ms | 0.5 / 0.6 ms |
 
-Same test, with `imu_log` frozen for 1 s partway through (`kill -STOP`, then `kill -CONT`), like the thread getting stuck:
+Same test, with `imu_log` frozen partway through (`kill -STOP`, then `kill -CONT`), like the thread getting stuck:
 
-| | Polling | FIFO |
+| Freeze | Polling missed | FIFO missed |
 | --- | --- | --- |
-| Samples | 933 (93.2 Hz) | 1035 (103.5 Hz) |
-| Missed samples | 104 | 0 |
+| 0.2 s | 22 | 0 (3 runs) |
+| 1 s | 104 | 105, emptied on purpose |
 
-Frozen for 10 s instead (`imu_log -t 20`), so the FIFO overruns: 1289 samples plus 786 counted as missed (2080 expected), 0 failed reads, and the samples right after the gap were normal. The FIFO held about 2.4 s of the 10 s.
+Under 0.25 s the FIFO covers the whole gap. Longer than that the backlog is thrown away so gestures don't fire late. This test also found timestamps going backwards when the stall landed between reading the FIFO status and the clock, so the timing correction is now capped and only moves forward.
+
+Before the emptying was added, a 10 s freeze (`imu_log -t 20`) overran the FIFO: 1289 samples plus 786 counted as missed (2080 expected), 0 failed reads, and normal samples right after the gap. That's how the 2.4 s size was measured.
 
 Running 4 busy processes at the same time made no difference to either, since the board has 4 cores. Gestures and the full game were also checked on FIFO.
 
@@ -212,5 +215,4 @@ To be filled in from chest strap recordings: 10 of each gesture and 30 s standin
 - Chest strap recordings, threshold tuning and the accuracy table above
 - Time jump then lean on the strap and pick the game's top speed
 - Check 104 Hz and 0 failed reads through the EndPoints and Cat6 cable
-- A very fast crouch (hand held) once fired a JUMP from the stop at the bottom. Check on the strap, and if it still happens block jumps while bent forward
 - INT1 (data-ready pin) would only work on short wires, since the EndPoint cable only carries I²C and power

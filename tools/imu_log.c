@@ -86,7 +86,7 @@ int main(int argc, char **argv)
     unsigned long n = 0, fails = 0, missed = 0;
     // how far each gap between samples is from 1/104 s
     double period = 1000.0 / 104.0, off_sum = 0, off_max = 0;
-    unsigned long gaps = 0;
+    unsigned long gaps = 0, backwards = 0;
 
     while (g_running) {
         ImuSample s;
@@ -113,6 +113,9 @@ int main(int argc, char **argv)
 
         if (n == 0) {
             first = s.t_ms;
+        } else if (s.t_ms <= last) {
+            // timestamps should only go forward
+            backwards++;
         } else {
             double dt = (double)(s.t_ms - last);
             if (dt > 1.5 * period) {
@@ -137,5 +140,7 @@ int main(int argc, char **argv)
             span > 0 ? (n - 1) / span : 0.0, fails);
     fprintf(stderr, "%lu missed samples, timing off by %.1f ms avg, %.1f ms worst\n",
             missed, gaps ? off_sum / gaps : 0.0, off_max);
+    if (backwards)
+        fprintf(stderr, "%lu timestamps didn't go forward\n", backwards);
     return 0;
 }
