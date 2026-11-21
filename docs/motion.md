@@ -2,7 +2,7 @@
 
 The player steers with a chest-mounted IMU: lean left or right to change lanes, jump over rocks and bend forward to duck under branches. This covers the sensor, the driver, calibration, gesture detection, the tools and the results so far.
 
-Code: `hal/imu.c`, `app/gesture.c`, `tests/gesture_test.c`, `tools/imu_log.c`, `tools/plot_imu.py`, `tools/gesture_replay.c`.
+Code: `hal/imu.c`, `app/gesture.c`, `app/tilt_meter.c`, `tests/gesture_test.c`, `tests/tilt_meter_test.c`, `tools/imu_log.c`, `tools/plot_imu.py`, `tools/gesture_replay.c`.
 
 ## Hardware
 
@@ -146,6 +146,22 @@ Sensitivity scales all thresholds:
 
 All the public gesture functions share one mutex since the IMU thread and the menu call them from different threads. The game's IMU thread (`app/imu_worker.c`) runs `imu_read()` -> `gesture_update()` -> `events_push(ev, SRC_IMU)`. If there's no good reading for 0.5 s during play (for example a loose wire) the game shows the IMU as unavailable and keeps going on the keyboard, and goes back once readings return. During calibration the game stays paused and calibration carries on when readings come back.
 
+## Tilt meter
+
+Once the IMU is ready, two bars under the game show the live roll and pitch, so the player can see how far they're leaning and where a move fires:
+
+```
+TILT  L [------|-----*------|------] R   +3 deg
+BEND    [####........|.......]           9 deg
+```
+
+- TILT covers -40° to +40°. `*` is the roll and the two `|` are the lean angle each way.
+- BEND fills with pitch from 0° to 40°. `|` is the crouch angle. Leaning back shows nothing.
+- The marks come from `gesture_thresholds()`, the lean and crouch angles with the sensitivity applied, so they move when the sensitivity changes and line up with where the moves fire.
+- The bend bar can pass its mark during a lean without a crouch firing, since the bigger tilt wins (see above).
+
+Code: `app/tilt_meter.c` builds the bars from `gesture_debug()` and `gesture_thresholds()`, and the HDMI screen can use the same two calls.
+
 ## Latency
 
 | Step | Time |
@@ -179,6 +195,8 @@ See `data/README.md` for the recording and replay commands.
 - a wobble in the air, a forward dip after landing, a crouch drifting sideways and leaning back with drift don't fire a lean or crouch
 - a hard stop at the bottom of a deep crouch and standing up fast don't fire a jump, but a jump from a dip past the crouch angle still does
 - sensitivity levels, quick calibration, cancel, saved axes and rejected axes
+
+`tilt_meter_test` checks the bars: centered at 0°, the marker past or inside the lean marks, clamping at the ends, the bend fill and mark, and the marks moving with each sensitivity level.
 
 Board testing with `imu_log -g` (IMU held on a breadboard against the chest) found these problems, which were fixed and checked with replay:
 
