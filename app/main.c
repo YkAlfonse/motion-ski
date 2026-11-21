@@ -343,7 +343,6 @@ int main(int argc, char **argv)
     char name_edit[MAX_USERNAME + 1];
     int name_cursor = 0;
     bool invalid_name = false;
-    bool keyboard_name_started = false;
 
     uint64_t previous_time = now_ms();
     uint64_t last_draw = 0;
@@ -353,13 +352,6 @@ int main(int argc, char **argv)
             char key;
 
             while (keyboard_pop_name_key(&key)) {
-                if (!keyboard_name_started) {
-                    memset(name_edit, ' ', MAX_USERNAME);
-                    name_edit[MAX_USERNAME] = '\0';
-                    name_cursor = 0;
-                    keyboard_name_started = true;
-                }
-
                 int length = 0;
 
                 while (length < MAX_USERNAME &&
@@ -431,7 +423,6 @@ int main(int argc, char **argv)
                         name_edit[MAX_USERNAME] = '\0';
                         name_cursor = 0;
                         invalid_name = false;
-                        keyboard_name_started = false;
                         keyboard_set_name_mode(true);
                         view = VIEW_NAME;
                         break;
