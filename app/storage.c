@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
+#include <ctype.h>
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -78,7 +79,34 @@ static bool file_path(char *path, size_t size, const char *name)
     return n >= 0 && (size_t)n < size;
 }
 
-static int read_scores(int scores[MAX_SCORES])
+
+static bool normalize_name(char out[MAX_USERNAME + 1], const char *name)
+{
+    if (!name)
+        return false;
+
+    size_t length = strlen(name);
+
+    if (length == 0 || length > MAX_USERNAME)
+        return false;
+
+    for (size_t i = 0; i < length; i++) {
+        unsigned char c = (unsigned char)name[i];
+
+        if (!((c >= 'A' && c <= 'Z') ||
+              (c >= 'a' && c <= 'z') ||
+              (c >= '0' && c <= '9') ||
+              c == '_' || c == '-'))
+            return false;
+
+        out[i] = (char)toupper(c);
+    }
+
+    out[length] = '\0';
+    return true;
+}
+
+static int read_entries(ScoreEntry entries[MAX_SCORES])
 {
     char path[600];
     char line[128];
@@ -97,12 +125,57 @@ static int read_scores(int scores[MAX_SCORES])
         errno = 0;
         long value = strtol(line, &end, 10);
 
-        if (errno || end == line || value < 0 || value > 2147483647L)
+        if (errno || end == line || value < 0 ||
+            value > 2147483647L)
             continue;
+
+        if (*end && !isspace((unsigned char)*end))
+            continue;
+
+        ScoreEntry entry = { .score = (int)value };
+        strcpy(entry.name, "PLAYER");
+
+        while (isspace((unsigned char)*end))
+            end++;
+
+        if (*end) {
+            size_t length = strcspn(end, " \t\r\n");
+
+            if (length == 0 || length > MAX_USERNAME)
+                continue;
+
+            char raw[MAX_USERNAME + 1];
+            memcpy(raw, end, length);
+            raw[length] = '\0';
+
+            if (!normalize_name(entry.name, raw))
+                continue;
+        }
+
+        if (strcmp(entry.name, "PLAYER") != 0) {
+            int existing = -1;
+
+            for (int i = 0; i < count; i++) {
+                if (strcmp(entries[i].name, entry.name) == 0) {
+                    existing = i;
+                    break;
+                }
+            }
+
+            if (existing >= 0) {
+                if (entries[existing].score >= entry.score)
+                    continue;
+
+                for (int i = existing; i < count - 1; i++)
+                    entries[i] = entries[i + 1];
+
+                count--;
+            }
+        }
 
         int pos = 0;
 
-        while (pos < count && scores[pos] >= value)
+        while (pos < count && entries[pos].score >= entry.score)
             pos++;
 
         if (pos >= MAX_SCORES)
@@ -112,13 +185,21 @@ static int read_scores(int scores[MAX_SCORES])
             count++;
 
         for (int j = count - 1; j > pos; j--)
-            scores[j] = scores[j - 1];
+            entries[j] = entries[j - 1];
 
-        scores[pos] = (int)value;
+        entries[pos] = entry;
     }
 
     fclose(file);
     return count;
+}
+
+int scores_get_named(ScoreEntry out[MAX_SCORES])
+{
+    if (!out)
+        return 0;
+
+    return read_entries(out);
 }
 
 int scores_get(int out[MAX_SCORES])
@@ -126,7 +207,13 @@ int scores_get(int out[MAX_SCORES])
     if (!out)
         return 0;
 
-    return read_scores(out);
+    ScoreEntry entries[MAX_SCORES];
+    int count = read_entries(entries);
+
+    for (int i = 0; i < count; i++)
+        out[i] = entries[i].score;
+
+    return count;
 }
 
 static FILE *open_temporary(const char *path, char *temp, size_t size)
@@ -170,16 +257,39 @@ static bool save_temporary(FILE *file, const char *temp, const char *path)
     return ok;
 }
 
-int scores_add(int score)
+
+int scores_add_named(const char *name, int score)
 {
     if (score < 0)
         return -1;
 
-    int scores[MAX_SCORES];
-    int count = read_scores(scores);
+    ScoreEntry entry = { .score = score };
+
+    if (!normalize_name(entry.name, name))
+        return -1;
+
+    ScoreEntry entries[MAX_SCORES];
+    int count = read_entries(entries);
+
+    if (strcmp(entry.name, "PLAYER") != 0) {
+        for (int i = 0; i < count; i++) {
+            if (strcmp(entries[i].name, entry.name) != 0)
+                continue;
+
+            if (entries[i].score >= score)
+                return -1;
+
+            for (int j = i; j < count - 1; j++)
+                entries[j] = entries[j + 1];
+
+            count--;
+            break;
+        }
+    }
+
     int pos = 0;
 
-    while (pos < count && scores[pos] >= score)
+    while (pos < count && entries[pos].score >= score)
         pos++;
 
     if (pos >= MAX_SCORES)
@@ -189,9 +299,9 @@ int scores_add(int score)
         count++;
 
     for (int i = count - 1; i > pos; i--)
-        scores[i] = scores[i - 1];
+        entries[i] = entries[i - 1];
 
-    scores[pos] = score;
+    entries[pos] = entry;
 
     char path[600], temp[640];
 
@@ -205,14 +315,21 @@ int scores_add(int score)
 
     bool ok = true;
 
-    for (int i = 0; i < count; i++)
-        if (fprintf(file, "%d\n", scores[i]) < 0)
+    for (int i = 0; i < count; i++) {
+        if (fprintf(file, "%d %s\n",
+                    entries[i].score, entries[i].name) < 0)
             ok = false;
+    }
 
     if (!save_temporary(file, temp, path) || !ok)
         return -1;
 
     return pos;
+}
+
+int scores_add(int score)
+{
+    return scores_add_named("PLAYER", score);
 }
 
 Settings settings_get(void)

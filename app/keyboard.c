@@ -14,6 +14,12 @@ static pthread_t keyboard_thread;
 static struct termios saved_terminal;
 static atomic_bool keyboard_running = ATOMIC_VAR_INIT(false);
 static bool keyboard_started = false;
+static atomic_bool name_mode = ATOMIC_VAR_INIT(false);
+static pthread_mutex_t name_lock = PTHREAD_MUTEX_INITIALIZER;
+static char name_keys[64];
+static int name_head;
+static int name_count;
+
 
 typedef enum {
     KEY_NORMAL,
@@ -21,6 +27,45 @@ typedef enum {
     KEY_CSI,
     KEY_SS3
 } KeyState;
+
+static void queue_name_key(char key)
+{
+    pthread_mutex_lock(&name_lock);
+    if (name_count < 64) {
+        name_keys[(name_head + name_count) % 64] = key;
+        name_count++;
+    }
+    pthread_mutex_unlock(&name_lock);
+}
+
+void keyboard_set_name_mode(bool enabled)
+{
+    pthread_mutex_lock(&name_lock);
+    name_head = 0;
+    name_count = 0;
+    atomic_store(&name_mode, enabled);
+    pthread_mutex_unlock(&name_lock);
+}
+
+bool keyboard_pop_name_key(char *key)
+{
+    if (!key)
+        return false;
+
+    pthread_mutex_lock(&name_lock);
+
+    if (name_count == 0) {
+        pthread_mutex_unlock(&name_lock);
+        return false;
+    }
+
+    *key = name_keys[name_head];
+    name_head = (name_head + 1) % 64;
+    name_count--;
+
+    pthread_mutex_unlock(&name_lock);
+    return true;
+}
 
 static void handle_key(char key)
 {
@@ -81,7 +126,19 @@ static void handle_input_byte(char key, KeyState *state)
             return;
         }
 
-        handle_key(key);
+        if (atomic_load(&name_mode)) {
+            if (ch == '\n' || ch == '\r')
+                events_push(EV_SELECT, SRC_KEYBOARD);
+            else if (ch == 8 || ch == 127)
+                queue_name_key('\b');
+            else if ((ch >= 'A' && ch <= 'Z') ||
+                     (ch >= 'a' && ch <= 'z') ||
+                     (ch >= '0' && ch <= '9') ||
+                     ch == '_' || ch == '-')
+                queue_name_key((char)toupper(ch));
+        } else {
+            handle_key(key);
+        }
         return;
     }
 
@@ -92,7 +149,10 @@ static void handle_input_byte(char key, KeyState *state)
             *state = KEY_SS3;
         } else {
             *state = KEY_NORMAL;
-            handle_key(key);
+            if (atomic_load(&name_mode))
+                events_push(EV_BACK, SRC_KEYBOARD);
+            else
+                handle_key(key);
         }
         return;
     }
@@ -131,8 +191,13 @@ static void *keyboard_worker(void *arg)
             break;
         }
 
-        if (result == 0)
+        if (result == 0) {
+            if (state == KEY_ESCAPE && atomic_load(&name_mode)) {
+                events_push(EV_BACK, SRC_KEYBOARD);
+                state = KEY_NORMAL;
+            }
             continue;
+        }
 
         if (input.revents & (POLLERR | POLLHUP | POLLNVAL))
             break;
